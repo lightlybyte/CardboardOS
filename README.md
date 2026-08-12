@@ -9,6 +9,7 @@ An OS using only the official documentation of
 
 # Motto
 "Tears of Intense Suffering, and Suffering, Even the devil may cry"
+Also was thought of during a near-total solar eclipse
 
 Goal: To make a functional OS in 1 year
 
