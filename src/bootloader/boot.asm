@@ -1,82 +1,45 @@
-; ============================================================
-; bootloader.asm - Loads and executes C kernel
-; Compile: nasm -f bin boot.asm -o bootloader.bin
-; ============================================================
-
 [org 0x7c00]
 [bits 16]
 
 start:
-    ; Initialize segment registers
     xor ax, ax
     mov ds, ax
     mov es, ax
     mov ss, ax
     mov sp, 0x7c00
     
-    ; Print loading message
-    mov si, msg_loading
-    call print_string
+    mov si, msg
+    call print
     
-    ; Reset disk system
-    mov ah, 0x00
-    mov dl, 0x80
+    ; Load kernel at 0x1000:0x0000
+    mov ax, 0x1000
+    mov es, ax
+    xor bx, bx
+    
+    mov ah, 0x02
+    mov al, 20
+    mov ch, 0
+    mov cl, 2
+    mov dh, 0
+    mov dl, 0x00
     int 0x13
+    jc disk_error
     
-    ; Load kernel from disk (sectors 2-33 = 32 sectors = 16KB)
-    mov ah, 0x02        ; BIOS read sectors function
-    mov al, 32          ; Number of sectors to read
-    mov ch, 0           ; Cylinder 0
-    mov cl, 2           ; Start from sector 2 (1-indexed)
-    mov dh, 0           ; Head 0
-    mov dl, 0x80        ; First hard disk
-    mov bx, 0x1000      ; Load kernel at 0x1000:0x0000
-    int 0x13
-    jc disk_error       ; Jump if carry flag set (error)
-    
-    ; Print OK message
     mov si, msg_ok
-    call print_string
+    call print
     
-    ; Switch to 32-bit protected mode
-    call switch_to_32bit
-
-print_string:
-    lodsb
-    or al, al
-    jz .done
-    mov ah, 0x0e
-    int 0x10
-    jmp print_string
-.done:
-    ret
-
-disk_error:
-    mov si, msg_error
-    call print_string
-    jmp $
-
-; ============================================================
-; Switch to 32-bit Protected Mode
-; ============================================================
-
-switch_to_32bit:
+    ; Switch to protected mode
     cli
-    
-    ; Load GDT
     lgdt [gdt_descriptor]
     
-    ; Enable protected mode
     mov eax, cr0
     or eax, 0x1
     mov cr0, eax
     
-    ; Far jump to 32-bit code
     jmp CODE_SEG:init_32bit
 
 [bits 32]
 init_32bit:
-    ; Update segment registers
     mov ax, DATA_SEG
     mov ds, ax
     mov es, ax
@@ -84,69 +47,55 @@ init_32bit:
     mov gs, ax
     mov ss, ax
     
-    ; Set up stack
     mov ebp, 0x90000
     mov esp, ebp
     
-    ; Clear screen
-    call clear_screen
+    ; Write debug message
+    mov edi, 0xB8000
+    add edi, 160
+    mov esi, msg_protected
+    call print_string_32
     
-    ; Print kernel start message
-    push msg_kernel_start
-    call print_32
-    add esp, 4
+    ; Jump to kernel using absolute address
+    ; Since we loaded at 0x1000:0x0000, physical address is 0x10000
+    mov eax, 0x10000
+    call eax
     
-    ; Call C kernel entry point
-    call 0x1000
-    
-    ; If kernel returns, hang
+    ; If kernel returns, halt
     jmp $
 
-; ============================================================
-; 32-bit Functions
-; ============================================================
-
-clear_screen:
+print_string_32:
     pusha
-    mov edi, 0xB8000
-    mov eax, 0x0F20      ; Space with white on black
-    mov ecx, 80*25
-    rep stosw
-    popa
-    ret
-
-print_32:
-    push ebp
-    mov ebp, esp
-    pusha
-    
-    mov edi, 0xB8000
-    mov ah, 0x0F         ; White on black
-    mov esi, [ebp+8]     ; Get string pointer
-    
+    mov ah, 0x0F
 .loop:
     lodsb
     test al, al
     jz .done
     stosw
     jmp .loop
-    
 .done:
     popa
-    mov esp, ebp
-    pop ebp
     ret
 
-; ============================================================
-; GDT
-; ============================================================
+print:
+    lodsb
+    or al, al
+    jz .done
+    mov ah, 0x0e
+    int 0x10
+    jmp print
+.done:
+    ret
 
+disk_error:
+    mov si, msg_error
+    call print
+    jmp $
+
+; GDT
 gdt_start:
-    ; Null descriptor
     dd 0x00000000
     dd 0x00000000
-    
-    ; Code segment (base=0, limit=4GB, 32-bit)
     gdt_code:
     dw 0xFFFF
     dw 0x0000
@@ -154,8 +103,6 @@ gdt_start:
     db 0b10011010
     db 0b11001111
     db 0x00
-    
-    ; Data segment (base=0, limit=4GB, 32-bit)
     gdt_data:
     dw 0xFFFF
     dw 0x0000
@@ -172,18 +119,10 @@ gdt_descriptor:
 CODE_SEG equ gdt_code - gdt_start
 DATA_SEG equ gdt_data - gdt_start
 
-; ============================================================
-; Data
-; ============================================================
-
-msg_loading:        db 'Loading kernel...', 0
+msg:                db 'Loading kernel...', 13, 10, 0
 msg_ok:             db 'OK', 13, 10, 0
-msg_error:          db 'Disk error!', 0
-msg_kernel_start:   db 'Kernel starting...', 13, 10, 0
-
-; ============================================================
-; Boot signature
-; ============================================================
+msg_error:          db 'Error!', 13, 10, 0
+msg_protected:      db '32-bit mode!', 0
 
 times 510 - ($ - $$) db 0
 dw 0xAA55
