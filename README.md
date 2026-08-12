@@ -5,7 +5,12 @@ An OS using only the official documentation of
 - NASM
 - C++
 - C
-- QEMU \n
+- QEMU
+
+# Motto
+"Tears of Intense Suffering, and Suffering, Even the devil may cry"
+
 Goal: To make a functional OS in 1 year
+
 # Starting D&T: 12th of April 2026 @ 17:00 UCT
 "Throughout mortal bounds and omniscience, I am the true programmer." - lightlybyte
