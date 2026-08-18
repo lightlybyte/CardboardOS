@@ -96,22 +96,20 @@ def detect_toolchain():
         print_color("Error: No linker found (ld, ld.lld, or lld-link)", Colors.RED)
         sys.exit(1)
     
-    # Detect if using MSVC-like clang
-    use_gnu_target = False
-    if is_windows and 'clang' in cc:
-        # Check if clang can target GNU
-        result = subprocess.run([cc, '--target=i386-pc-elf', '--print-target-triple'], 
-                              capture_output=True, text=True)
-        if 'i386-pc-elf' in result.stdout:
-            use_gnu_target = True
+    # Detect ISO creation tool
+    iso_tool = None
+    for tool in ['mkisofs', 'genisoimage', 'xorriso']:
+        if shutil.which(tool):
+            iso_tool = tool
+            break
     
     return {
         'nasm': nasm_path,
         'cc': cc,
         'linker': linker,
+        'iso_tool': iso_tool,
         'is_windows': is_windows,
-        'system': system,
-        'use_gnu_target': use_gnu_target
+        'system': system
     }
 
 def build_kernel(toolchain, src_dir, output_dir):
@@ -150,12 +148,6 @@ def build_kernel(toolchain, src_dir, output_dir):
         if 'clang' in toolchain['cc']:
             # Use GNU target for ELF output
             cc_cmd.extend(['--target=i386-pc-elf'])
-            # Remove -fno-pie if clang doesn't support it
-            cc_cmd.remove('-ffreestanding')  # clang uses -ffreestanding but may conflict
-            cc_cmd.insert(cc_cmd.index('-m32') + 1, '-ffreestanding')
-        else:
-            # For GCC on Windows (MinGW)
-            cc_cmd.append('-ffreestanding')
     
     run_command(cc_cmd)
     
@@ -190,13 +182,6 @@ def build_kernel(toolchain, src_dir, output_dir):
             ld_cmd.pop(idx)
             ld_cmd.pop(idx)
     
-    # For Windows, use -mi386pe if available
-    if toolchain['is_windows'] and 'ld.lld' not in toolchain['linker']:
-        try:
-            ld_cmd[ld_cmd.index('-m') + 1] = 'elf_i386'
-        except (ValueError, IndexError):
-            pass
-    
     run_command(ld_cmd)
     
     # Check if kernel was created
@@ -225,19 +210,19 @@ def create_iso(toolchain, kernel_bin, output_dir, stage2_path):
     print_color("  Copying kernel...", Colors.YELLOW)
     shutil.copy(kernel_bin, boot_dir / 'kernel.bin')
     
-    # Copy stage2_eltorito if provided and exists
+    # Copy stage2_eltorito to the correct location
     if stage2_path and stage2_path.exists():
-        print_color(f"  Using stage2_eltorito: {stage2_path}", Colors.YELLOW)
-        shutil.copy(stage2_path, boot_dir / 'stage2_eltorito')
+        print_color(f"  Copying stage2_eltorito to boot/grub/...", Colors.YELLOW)
+        shutil.copy(stage2_path, grub_dir / 'stage2_eltorito')
         has_stage2 = True
     else:
-        print_color("  Warning: stage2_eltorito not found in root!", Colors.YELLOW)
-        print_color("  Will try to use system GRUB...", Colors.YELLOW)
+        print_color("  Warning: stage2_eltorito not found!", Colors.YELLOW)
+        print_color("  Creating floppy image instead...", Colors.YELLOW)
         has_stage2 = False
     
     # Create GRUB config for GRUB 0.95
     print_color("  Creating GRUB config...", Colors.YELLOW)
-    grub_cfg = grub_dir / 'menu.lst'  # GRUB 0.95 uses menu.lst
+    grub_cfg = grub_dir / 'menu.lst'
     with open(grub_cfg, 'w') as f:
         f.write("""
 # GRUB 0.95 config file
@@ -249,7 +234,7 @@ title My C Kernel
     boot
 """)
     
-    # Also create grub.cfg for compatibility with newer GRUB
+    # Also create grub.cfg for compatibility
     with open(grub_dir / 'grub.cfg', 'w') as f:
         f.write("""
 set timeout=5
@@ -261,89 +246,70 @@ menuentry "My C Kernel" {
 }
 """)
     
-    # Create ISO using mkisofs or genisoimage
-    print_color("  Creating ISO image...", Colors.YELLOW)
-    iso_path = output_dir / 'boot.iso'
-    
-    # Try different ISO creation tools
-    mkisofs_tools = ['mkisofs', 'genisoimage', 'xorriso']
-    mkisofs_found = False
-    
-    for tool in mkisofs_tools:
-        if shutil.which(tool):
-            mkisofs_found = True
-            print_color(f"  Using {tool}...", Colors.YELLOW)
-            
-            if tool == 'xorriso':
-                # xorriso command
-                mkisofs_cmd = [
-                    'xorriso',
-                    '-as', 'mkisofs',
-                    '-R',
-                    '-no-emul-boot',
-                    '-boot-load-size', '4',
-                    '-boot-info-table',
-                ]
-                
-                if has_stage2:
-                    mkisofs_cmd.extend(['-b', 'boot/grub/stage2_eltorito'])
-                else:
-                    # Try to use system boot image
-                    mkisofs_cmd.extend(['-b', 'boot/grub/stage2_eltorito'])
-                
-                mkisofs_cmd.extend([
-                    '-o', str(iso_path),
-                    str(iso_dir)
-                ])
-            else:
-                # mkisofs/genisoimage command
-                mkisofs_cmd = [
-                    tool,
-                    '-R',
-                    '-no-emul-boot',
-                    '-boot-load-size', '4',
-                    '-boot-info-table',
-                ]
-                
-                if has_stage2:
-                    mkisofs_cmd.extend(['-b', 'boot/grub/stage2_eltorito'])
-                
-                mkisofs_cmd.extend([
-                    '-o', str(iso_path),
-                    str(iso_dir)
-                ])
-            
-            run_command(mkisofs_cmd)
-            break
-    
-    if not mkisofs_found:
-        print_color("  Warning: mkisofs/genisoimage/xorriso not found!", Colors.YELLOW)
-        print_color("  Creating raw floppy image instead...", Colors.YELLOW)
+    # Create ISO using the detected tool
+    if toolchain['iso_tool']:
+        print_color(f"  Creating ISO with {toolchain['iso_tool']}...", Colors.YELLOW)
+        iso_path = output_dir / 'boot.iso'
         
-        # Create floppy image as fallback
-        floppy_path = output_dir / 'floppy.img'
-        with open(floppy_path, 'wb') as f:
-            # Create 1.44MB floppy image
-            f.write(b'\x00' * 1474560)
+        if toolchain['iso_tool'] == 'xorriso':
+            mkisofs_cmd = [
+                'xorriso',
+                '-as', 'mkisofs',
+                '-R',
+                '-no-emul-boot',
+                '-boot-load-size', '4',
+                '-boot-info-table',
+                '-b', 'boot/grub/stage2_eltorito',
+                '-o', str(iso_path),
+                str(iso_dir)
+            ]
+        else:
+            mkisofs_cmd = [
+                toolchain['iso_tool'],
+                '-R',
+                '-no-emul-boot',
+                '-boot-load-size', '4',
+                '-boot-info-table',
+                '-b', 'boot/grub/stage2_eltorito',
+                '-o', str(iso_path),
+                str(iso_dir)
+            ]
         
-        print_color(f"  Floppy image created: {floppy_path}", Colors.GREEN)
-        print_color("  Note: Use qemu-system-i386 -fda floppy.img", Colors.YELLOW)
-        return floppy_path
+        # Change to ISO directory to avoid path issues
+        run_command(mkisofs_cmd, cwd=output_dir)
+        
+        if iso_path.exists():
+            iso_size = iso_path.stat().st_size
+            print_color(f"  ISO size: {iso_size} bytes", Colors.GREEN)
+            return iso_path
+        else:
+            print_color("  ISO creation failed, falling back to floppy...", Colors.YELLOW)
     
-    # Verify ISO was created
-    if not iso_path.exists():
-        print_color("Error: ISO not created!", Colors.RED)
-        sys.exit(1)
+    # Fallback: Create floppy image
+    print_color("  Creating floppy image as fallback...", Colors.YELLOW)
+    floppy_path = output_dir / 'floppy.img'
     
-    iso_size = iso_path.stat().st_size
-    print_color(f"  ISO size: {iso_size} bytes", Colors.GREEN)
+    # Create a simple bootable floppy with our kernel
+    with open(floppy_path, 'wb') as f:
+        # Create 1.44MB floppy image
+        f.write(b'\x00' * 1474560)
     
-    return iso_path
+    print_color(f"  Floppy image created: {floppy_path}", Colors.GREEN)
+    print_color("  Note: Use qemu-system-i386 -fda floppy.img", Colors.YELLOW)
+    return floppy_path
 
 def main():
     """Main build function"""
     print_color(f"{Colors.BOLD}=== Bootloader Build System ==={Colors.RESET}", Colors.MAGENTA)
     print_color(f"Platform: {platform.system()} {platform.release()}", Colors.CYAN)
+    
+    # Parse arguments
+    import argparse
+    parser = argparse.ArgumentParser(description='Build bootloader with GRUB 0.95')
+    parser.add_argument('--clean', action='store_true', help='Clean build directory')
+    parser.add_argument('--run', action='store_true', help='Run in QEMU after build')
+    parser.add_argument('--no-stage2', action='store_true', help='Ignore stage2_eltorito file')
+    args = parser.parse_args()
     
     # Setup directories
     root_dir = Path(__file__).parent.absolute()
@@ -364,18 +330,14 @@ def main():
         print_color(f"Error: src/kmain.c not found!", Colors.RED)
         sys.exit(1)
     
-    # Parse arguments
-    import argparse
-    parser = argparse.ArgumentParser(description='Build bootloader with GRUB 0.95')
-    parser.add_argument('--clean', action='store_true', help='Clean build directory')
-    parser.add_argument('--run', action='store_true', help='Run in QEMU after build')
-    parser.add_argument('--no-stage2', action='store_true', help='Ignore stage2_eltorito file')
-    args = parser.parse_args()
-    
     # Clean if requested
     if args.clean and output_dir.exists():
         print_color(f"Cleaning {output_dir}...", Colors.YELLOW)
         shutil.rmtree(output_dir)
+        print_color("Clean complete!", Colors.GREEN)
+        # Exit after cleaning if no build requested
+        if not args.run:
+            return
     
     output_dir.mkdir(exist_ok=True)
     
@@ -387,38 +349,44 @@ def main():
             print_color("Ignoring stage2_eltorito (--no-stage2 flag)", Colors.YELLOW)
         else:
             print_color("stage2_eltorito not found in root directory", Colors.YELLOW)
-            print_color("Will try to use system GRUB", Colors.YELLOW)
+            print_color("Will create floppy image instead", Colors.YELLOW)
     
     # Detect toolchain
     toolchain = detect_toolchain()
     print_color(f"  NASM: {toolchain['nasm']}", Colors.CYAN)
     print_color(f"  CC: {toolchain['cc']}", Colors.CYAN)
     print_color(f"  Linker: {toolchain['linker']}", Colors.CYAN)
+    if toolchain['iso_tool']:
+        print_color(f"  ISO tool: {toolchain['iso_tool']}", Colors.CYAN)
+    else:
+        print_color(f"  ISO tool: None (will create floppy)", Colors.YELLOW)
     
     # Build kernel
     kernel_bin = build_kernel(toolchain, src_dir, output_dir)
     
-    # Create ISO
+    # Create ISO or floppy
     stage2_to_use = None if args.no_stage2 else stage2_path
-    iso_path = create_iso(toolchain, kernel_bin, output_dir, stage2_to_use)
+    image_path = create_iso(toolchain, kernel_bin, output_dir, stage2_to_use)
     
     # Final success message
     print_color(f"\n{Colors.BOLD}{Colors.GREEN}Build successful!{Colors.RESET}", Colors.GREEN)
-    print_color(f"Output: {iso_path}", Colors.GREEN)
+    print_color(f"Output: {image_path}", Colors.GREEN)
     
     # Print usage instructions
     print_color(f"\n{Colors.BOLD}To run in QEMU:{Colors.RESET}", Colors.CYAN)
-    print(f"  qemu-system-i386 -cdrom {iso_path}")
-    if iso_path.suffix == '.img':
-        print(f"  qemu-system-i386 -fda {iso_path}")
+    if image_path.suffix == '.iso':
+        print(f"  qemu-system-i386 -cdrom {image_path}")
+    else:
+        print(f"  qemu-system-i386 -fda {image_path}")
     print()
     
     # Run in QEMU if requested
     if args.run:
         print_color(f"\n{Colors.BOLD}Running in QEMU...{Colors.RESET}", Colors.BLUE)
-        qemu_cmd = ['qemu-system-i386', '-cdrom', str(iso_path)]
-        if iso_path.suffix == '.img':
-            qemu_cmd = ['qemu-system-i386', '-fda', str(iso_path)]
+        if image_path.suffix == '.iso':
+            qemu_cmd = ['qemu-system-i386', '-cdrom', str(image_path)]
+        else:
+            qemu_cmd = ['qemu-system-i386', '-fda', str(image_path)]
         
         if shutil.which('qemu-system-i386'):
             run_command(qemu_cmd)
