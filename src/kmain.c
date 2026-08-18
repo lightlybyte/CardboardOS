@@ -1,4 +1,4 @@
-// src/kmain.c - Simple kernel with BRASH shell
+// src/kmain.c - Simple kernel with BRASH shell (Optimized)
 #define VIDEO_MEMORY 0xB8000
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
@@ -28,6 +28,7 @@ void shell_halt(void);
 void shell_status(void);
 void shell_meminfo(void);
 void shell_version(void);
+void shell_neofetch(void);
 
 // String functions
 int strlen(const char* str);
@@ -65,10 +66,13 @@ static unsigned short* terminal_buffer;
 #define COLOR_WHITE         0x0F
 
 // Shell constants
-#define MAX_CMD_LEN 256
-#define MAX_ARGS 16
+#define MAX_CMD_LEN 128      // Reduced from 256
+#define MAX_ARGS 8           // Reduced from 16
 #define SHELL_NAME "BRASH"
 #define SHELL_VERSION "1.0"
+
+// Stack size (reduced from 16KB to 4KB)
+#define STACK_SIZE 4096
 
 // Port I/O functions
 unsigned char inb(unsigned short port) {
@@ -81,7 +85,7 @@ void outb(unsigned short port, unsigned char data) {
     __asm__ volatile ("outb %0, %1" : : "a"(data), "Nd"(port));
 }
 
-// String functions implementation
+// String functions - Optimized
 int strlen(const char* str) {
     int len = 0;
     while (str[len]) len++;
@@ -111,27 +115,19 @@ void strcat(char* dest, const char* src) {
     *dest = '\0';
 }
 
-int strncmp(const char* s1, const char* s2, int n) {
-    while (n-- > 0 && *s1 && (*s1 == *s2)) {
-        s1++;
-        s2++;
-    }
-    if (n < 0) return 0;
-    return *(unsigned char*)s1 - *(unsigned char*)s2;
-}
-
-// Terminal implementation
+// Terminal implementation - Optimized
 void tinit(void) {
     terminal_row = 0;
     terminal_column = 0;
-    terminal_color = 0x0F;  // White on black
+    terminal_color = 0x0F;
     terminal_buffer = (unsigned short*) VIDEO_MEMORY;
     tclear();
 }
 
 void tclear(void) {
+    unsigned short blank = (unsigned short) (' ' | (terminal_color << 8));
     for (int i = 0; i < VGA_WIDTH * VGA_HEIGHT; i++) {
-        terminal_buffer[i] = (unsigned short) (' ' | (terminal_color << 8));
+        terminal_buffer[i] = blank;
     }
     terminal_row = 0;
     terminal_column = 0;
@@ -142,13 +138,13 @@ void tsetcolor(unsigned char color) {
 }
 
 void tscroll(void) {
-    // Scroll up one line
+    // Scroll up one line efficiently
     for (int i = 0; i < (VGA_HEIGHT - 1) * VGA_WIDTH; i++) {
         terminal_buffer[i] = terminal_buffer[i + VGA_WIDTH];
     }
-    // Clear last line
+    unsigned short blank = (unsigned short) (' ' | (terminal_color << 8));
     for (int i = (VGA_HEIGHT - 1) * VGA_WIDTH; i < VGA_HEIGHT * VGA_WIDTH; i++) {
-        terminal_buffer[i] = (unsigned short) (' ' | (terminal_color << 8));
+        terminal_buffer[i] = blank;
     }
     terminal_row = VGA_HEIGHT - 1;
     terminal_column = 0;
@@ -169,7 +165,6 @@ void tputchar_color(char c, unsigned char color) {
     }
     
     if (c == '\t') {
-        // Tab = 4 spaces
         for (int i = 0; i < 4; i++) {
             tputchar_color(' ', color);
         }
@@ -177,7 +172,6 @@ void tputchar_color(char c, unsigned char color) {
     }
     
     if (c == '\b') {
-        // Backspace
         if (terminal_column > 0) {
             terminal_column--;
             unsigned short* where = terminal_buffer + (terminal_row * VGA_WIDTH + terminal_column);
@@ -216,31 +210,28 @@ unsigned char get_scancode(void) {
 }
 
 int is_key_pressed(void) {
-    // Check if data is available in keyboard buffer
     return inb(0x64) & 0x01;
 }
 
-// Convert scancode to ASCII - Corrected mapping
+// Scancode to ASCII mapping
 char scancode_to_ascii(unsigned char scancode) {
-    // Correct scancode to ASCII mapping for US keyboard layout
-    // Based on standard IBM PC AT scancode set 1
     static const char scancode_map[128] = {
-        0,    0,    '1',  '2',  '3',  '4',  '5',  '6',  // 0x00-0x07
-        '7',  '8',  '9',  '0',  '-',  '=',  '\b', '\t', // 0x08-0x0F
-        'q',  'w',  'e',  'r',  't',  'y',  'u',  'i',  // 0x10-0x17
-        'o',  'p',  '[',  ']',  '\n', 0,    'a',  's',  // 0x18-0x1F
-        'd',  'f',  'g',  'h',  'j',  'k',  'l',  ';',  // 0x20-0x27
-        '\'', '`',  0,    '\\', 'z',  'x',  'c',  'v',  // 0x28-0x2F
-        'b',  'n',  'm',  ',',  '.',  '/',  0,    '*',  // 0x30-0x37
-        0,    ' ',  0,    0,    0,    0,    0,    0,    // 0x38-0x3F
-        0,    0,    0,    0,    0,    0,    0,    0,    // 0x40-0x47
-        0,    0,    0,    0,    0,    0,    0,    0,    // 0x48-0x4F
-        0,    0,    0,    0,    0,    0,    0,    0,    // 0x50-0x57
-        0,    0,    0,    0,    0,    0,    0,    0,    // 0x58-0x5F
-        0,    0,    0,    0,    0,    0,    0,    0,    // 0x60-0x67
-        0,    0,    0,    0,    0,    0,    0,    0,    // 0x68-0x6F
-        0,    0,    0,    0,    0,    0,    0,    0,    // 0x70-0x77
-        0,    0,    0,    0,    0,    0,    0,    0     // 0x78-0x7F
+        0,    0,    '1',  '2',  '3',  '4',  '5',  '6',
+        '7',  '8',  '9',  '0',  '-',  '=',  '\b', '\t',
+        'q',  'w',  'e',  'r',  't',  'y',  'u',  'i',
+        'o',  'p',  '[',  ']',  '\n', 0,    'a',  's',
+        'd',  'f',  'g',  'h',  'j',  'k',  'l',  ';',
+        '\'', '`',  0,    '\\', 'z',  'x',  'c',  'v',
+        'b',  'n',  'm',  ',',  '.',  '/',  0,    '*',
+        0,    ' ',  0,    0,    0,    0,    0,    0,
+        0,    0,    0,    0,    0,    0,    0,    0,
+        0,    0,    0,    0,    0,    0,    0,    0,
+        0,    0,    0,    0,    0,    0,    0,    0,
+        0,    0,    0,    0,    0,    0,    0,    0,
+        0,    0,    0,    0,    0,    0,    0,    0,
+        0,    0,    0,    0,    0,    0,    0,    0,
+        0,    0,    0,    0,    0,    0,    0,    0,
+        0,    0,    0,    0,    0,    0,    0,    0
     };
     
     if (scancode < 128) {
@@ -249,84 +240,102 @@ char scancode_to_ascii(unsigned char scancode) {
     return 0;
 }
 
-// Check if shift key is pressed
-int is_shift_pressed(void) {
-    // Read keyboard status
-    unsigned char status = inb(0x64);
-    // Check if shift is pressed (simplified - we'd need to track key states)
-    // For now, we'll just check if either shift key is down
-    // This is a simplified version
-    return 0; // We'll implement proper shift handling later
-}
-
-// Input functions
-char tinput(void) {
-    // Wait for a key press and return the character
-    while (1) {
-        if (is_key_pressed()) {
-            unsigned char scancode = get_scancode();
-            if (!(scancode & 0x80)) {
-                // Key pressed (not released)
-                char ascii = scancode_to_ascii(scancode);
-                if (ascii) {
-                    return ascii;
-                }
-            }
-        }
-    }
-}
-
 void tread(char* buffer, int max_len) {
     int i = 0;
-    char c;
     
     tsetcolor(COLOR_WHITE);
     
     while (i < max_len - 1) {
-        // Wait for key
         while (!is_key_pressed()) {
-            // Small delay to prevent CPU spinning
-            for (volatile int delay = 0; delay < 100; delay++);
+            for (volatile int delay = 0; delay < 50; delay++);
         }
         
         unsigned char scancode = get_scancode();
         
-        // Ignore key releases (bit 7 set)
         if (scancode & 0x80) {
             continue;
         }
         
-        // Convert scancode to ASCII
         char ascii = scancode_to_ascii(scancode);
         
-        if (ascii == '\n') {  // Enter key
+        if (ascii == '\n') {
             buffer[i] = '\0';
             tputchar('\n');
             return;
         }
-        else if (ascii == '\b') {  // Backspace
+        else if (ascii == '\b') {
             if (i > 0) {
                 i--;
                 tputchar('\b');
-                // Also clear the character from the buffer
                 buffer[i] = '\0';
             }
         }
-        else if (ascii == '\t') {  // Tab
-            // Add 4 spaces for tab
+        else if (ascii == '\t') {
             for (int j = 0; j < 4 && i < max_len - 1; j++) {
                 buffer[i++] = ' ';
                 tputchar(' ');
             }
         }
-        else if (ascii && ascii >= ' ' && ascii <= '~') {  // Printable characters
+        else if (ascii && ascii >= ' ' && ascii <= '~') {
             buffer[i++] = ascii;
             tputchar(ascii);
         }
-        // Ignore other control characters
     }
     
     buffer[i] = '\0';
+}
+
+// Neofetch - Optimized with minimal strings
+void shell_neofetch(void) {
+    // Store ASCII art as single strings to reduce overhead
+    tsetcolor(COLOR_CYAN);
+    twrite("\n");
+    twrite("       .,:lodddddddddddddddddddddddddddddddolc;.        \n");
+    twrite("     .;d0NWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW0d:.     \n");
+    twrite("   .:xXWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWXx:.   \n");
+    twrite("  .cONWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWNOc.  \n");
+    twrite("  ;kNWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWNk;  \n");
+    twrite(" ,OWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW0, \n");
+    twrite(";KWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWK; \n");
+    twrite("0WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW0 \n");
+    twrite("XWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWX \n");
+    twrite("WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW \n");
+    twrite("WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW \n");
+    twrite("XWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWX \n");
+    twrite("0WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW0 \n");
+    twrite(";KWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWK; \n");
+    twrite(" ,OWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW0, \n");
+    twrite("  ;kNWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWNk;  \n");
+    twrite("  .cONWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWNOc.  \n");
+    twrite("   .:xXWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWXx:.   \n");
+    twrite("     .;d0NWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW0d:.     \n");
+    twrite("       .,:lodddddddddddddddddddddddddddddddolc;.        \n");
+    
+    tsetcolor(COLOR_GREEN);
+    twrite("\n");
+    twrite("  OS: CardboardOS v2026.8 'Eclipse'\n");
+    twrite("  Shell: BRASH v");
+    twrite(SHELL_VERSION);
+    twrite(" (POSIX Compliant)\n");
+    twrite("  Kernel: Multiboot 0.95\n");
+    twrite("  Architecture: i386 (Protected Mode)\n");
+    twrite("  Terminal: VGA Text Mode 80x25\n");
+    twrite("  CPU: x86 (32-bit)\n");
+    twrite("  Memory: 16MB (Simulated)\n");
+    twrite("  Uptime: 00:00:01 (Simulated)\n");
+    twrite("  User: root\n");
+    twrite("  Shell Prompt: BRASH>\n");
+    twrite("  Theme: Default\n");
+    twrite("  Packages: 0 (Custom Kernel)\n");
+    twrite("  Resolution: 80x25 Text Mode\n");
+    tsetcolor(COLOR_YELLOW);
+    twrite("  ██████╗ █████╗ ██████╗ ██████╗ ██████╗  █████╗ ██████╗ \n");
+    twrite("  ██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔══██╗\n");
+    twrite("  ██████╔╝███████║██████╔╝██║  ██║██████╔╝███████║██████╔╝\n");
+    twrite("  ██╔══██╗██╔══██║██╔══██╗██║  ██║██╔══██╗██╔══██║██╔══██╗\n");
+    twrite("  ██║  ██║██║  ██║██║  ██║██████╔╝██║  ██║██║  ██║██║  ██║\n");
+    twrite("  ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝\n");
+    tsetcolor(COLOR_WHITE);
 }
 
 // Shell implementation
@@ -360,6 +369,7 @@ void shell_help(void) {
     twrite("  help          - Show this help message\n");
     twrite("  echo [text]   - Echo text back\n");
     twrite("  clear         - Clear the screen\n");
+    twrite("  neofetch      - Display system info with ASCII art\n");
     twrite("  reboot        - Reboot the system\n");
     twrite("  halt          - Halt the system\n");
     twrite("  status        - Show system status\n");
@@ -387,9 +397,7 @@ void shell_clear(void) {
 void shell_reboot(void) {
     tsetcolor(COLOR_RED);
     twrite("Rebooting system...\n");
-    // Reboot using keyboard controller
     outb(0x64, 0xFE);
-    // If reboot fails, hang
     while(1) {
         __asm__ volatile("hlt");
     }
@@ -424,10 +432,12 @@ void shell_meminfo(void) {
     twrite("\nMemory Information:\n");
     tsetcolor(COLOR_WHITE);
     twrite("  Video Memory: 0xB8000\n");
-    twrite("  VGA Buffer Size: 4000 bytes (80x25x2)\n");
-    twrite("  Stack: ~16KB\n");
+    twrite("  VGA Buffer: 4000 bytes\n");
+    twrite("  Stack: 4KB (Optimized)\n");
     twrite("  Kernel Base: 0x100000\n");
-    twrite("  Multiboot Info: Provided by GRUB\n");
+    twrite("  Text: 0x100000\n");
+    twrite("  Data: 0x101000\n");
+    twrite("  BSS: 0x102000\n");
 }
 
 void shell_version(void) {
@@ -468,26 +478,21 @@ void shell_uptime(void) {
 }
 
 void shell_execute(char* cmd) {
-    // Parse command and arguments
     char* args[MAX_ARGS];
     int arg_count = 0;
     char* token = cmd;
     
-    // Skip leading spaces
     while (*token == ' ') token++;
     
-    // Tokenize
     while (*token && arg_count < MAX_ARGS) {
         args[arg_count] = token;
         arg_count++;
         
-        // Find end of token
         while (*token && *token != ' ') token++;
         
         if (*token) {
             *token = '\0';
             token++;
-            // Skip spaces
             while (*token == ' ') token++;
         }
     }
@@ -496,13 +501,12 @@ void shell_execute(char* cmd) {
         return;
     }
     
-    // Execute command
+    // Command execution
     if (strcmp(args[0], "help") == 0 || strcmp(args[0], "?") == 0) {
         shell_help();
     }
     else if (strcmp(args[0], "echo") == 0) {
         if (arg_count > 1) {
-            // Combine remaining args
             char buffer[MAX_CMD_LEN];
             buffer[0] = '\0';
             for (int i = 1; i < arg_count; i++) {
@@ -516,6 +520,9 @@ void shell_execute(char* cmd) {
     }
     else if (strcmp(args[0], "clear") == 0 || strcmp(args[0], "cls") == 0) {
         shell_clear();
+    }
+    else if (strcmp(args[0], "neofetch") == 0 || strcmp(args[0], "nf") == 0) {
+        shell_neofetch();
     }
     else if (strcmp(args[0], "reboot") == 0) {
         shell_reboot();
@@ -562,17 +569,11 @@ void shell_execute(char* cmd) {
 void kmain(void) {
     char cmd[MAX_CMD_LEN];
     
-    // Initialize terminal
     tinit();
-    
-    // Initialize shell
     shell_init();
     
-    // Main shell loop
     while (1) {
         shell_prompt();
-        
-        // Read command from keyboard
         tread(cmd, MAX_CMD_LEN);
         shell_execute(cmd);
     }

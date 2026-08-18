@@ -1,41 +1,41 @@
-; src/boot.asm - Multiboot compliant bootloader
+; src/boot.asm - Multiboot compliant bootloader (Optimized)
 ; Build: nasm -f elf32 src/boot.asm -o build/boot.o
 
 [BITS 32]
 [GLOBAL start]
-[EXTERN kmain]      ; External C function
+[EXTERN kmain]
 
-; Multiboot header - GRUB 0.95 compatible
+; Multiboot header
 section .multiboot
 align 4
-    dd 0x1BADB002          ; Magic number
-    dd 0x03                ; Flags: align on 4KB, provide memory info
-    dd -(0x1BADB002 + 0x03) ; Checksum
+    dd 0x1BADB002
+    dd 0x03
+    dd -(0x1BADB002 + 0x03)
 
 ; Kernel code section
 section .text
 start:
-    ; Set up stack pointer (16KB stack)
+    ; Set up stack pointer (4KB stack - optimized)
     mov esp, stack_end
     
     ; Clear EFLAGS
     push 0
     popf
     
-    ; Save multiboot info pointer for C code
+    ; Save multiboot info
     push ebx
     
     ; Call kmain
     call kmain
     
-    ; If kmain returns, hang
+    ; Hang if returns
     cli
     hlt
     jmp $
 
-; Stack section - 16KB stack
+; Stack section - 4KB stack (reduced from 16KB)
 section .bss
 align 16
 stack_bottom:
-    resb 16384  ; 16KB stack
+    resb 4096  ; 4KB stack
 stack_end:
