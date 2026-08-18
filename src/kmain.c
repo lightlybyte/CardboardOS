@@ -1,4 +1,4 @@
-// src/kmain.c - Complete kernel with BRASH shell
+// src/kmain.c - Complete kernel with BRASH shell and all drivers
 #define VIDEO_MEMORY 0xB8000
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
@@ -26,6 +26,8 @@ void shell_init(void);
 void shell_prompt(void);
 void shell_execute(char* cmd);
 void shell_help(void);
+void shell_help_page1(void);
+void shell_help_page2(void);
 void shell_echo(char* args);
 void shell_clear(void);
 void shell_reboot(void);
@@ -42,6 +44,24 @@ void shell_touch(char* args);
 void shell_cd(char* args);
 void shell_pwd(void);
 void shell_exfat_cmd(char* args);
+void shell_disk_list(void);
+void shell_disk_automount(void);
+void shell_disk_mount(char* args);
+void shell_disk_info(char* args);
+void shell_usb_list(void);
+void shell_usb_info(void);
+void shell_pcie_list(void);
+void shell_pcie_info(void);
+void shell_audio_list(void);
+void shell_audio_test(void);
+void shell_audio_play(char* args);
+void shell_net_list(void);
+void shell_net_info(void);
+void shell_net_ping(char* args);
+void shell_wifi_scan(void);
+void shell_wifi_connect(char* args);
+void shell_download(char* args);
+void shell_wget(char* args);
 
 // String functions
 int strlen(const char* str);
@@ -58,9 +78,14 @@ void outb(unsigned short port, unsigned char data);
 void* malloc(unsigned int size);
 void free(void* ptr);
 
-// exFAT driver
+// Driver includes
 #include "drivers/exfat.h"
 #include "drivers/disk.h"
+#include "drivers/usb.h"
+#include "drivers/pcie.h"
+#include "drivers/audio.h"
+#include "drivers/net.h"
+#include "drivers/http.h"
 
 // Terminal state
 static int terminal_row;
@@ -101,6 +126,9 @@ static uint8_t alt_pressed = 0;
 // Memory management
 static uint8_t heap[8192];
 static uint32_t heap_ptr = 0;
+
+// Help page state
+static uint8_t help_page = 1;
 
 // Port I/O functions
 unsigned char inb(unsigned short port) {
@@ -262,6 +290,47 @@ void twrite(const char* data) {
     terminal_write(data);
 }
 
+// Convert number to string (for shell functions)
+static void uint32_to_str(uint32_t num, char* str) {
+    if (num == 0) {
+        str[0] = '0';
+        str[1] = '\0';
+        return;
+    }
+    
+    char temp[16];
+    int idx = 0;
+    while (num > 0) {
+        temp[idx++] = '0' + (num % 10);
+        num /= 10;
+    }
+    
+    for (int i = 0; i < idx; i++) {
+        str[i] = temp[idx - 1 - i];
+    }
+    str[idx] = '\0';
+}
+
+static void uint64_to_str(uint64_t num, char* str) {
+    if (num == 0) {
+        str[0] = '0';
+        str[1] = '\0';
+        return;
+    }
+    
+    char temp[32];
+    int idx = 0;
+    while (num > 0) {
+        temp[idx++] = '0' + (num % 10);
+        num /= 10;
+    }
+    
+    for (int i = 0; i < idx; i++) {
+        str[i] = temp[idx - 1 - i];
+    }
+    str[idx] = '\0';
+}
+
 // Enhanced keyboard scancode to ASCII with shift support
 char scancode_to_ascii(unsigned char scancode, uint8_t shift) {
     // Normal keymap (ASCII only)
@@ -338,7 +407,7 @@ void update_modifiers(unsigned char scancode) {
     }
 }
 
-// FIXED: Read line with proper null termination
+// Read line with proper null termination
 void tread(char* buffer, int max_len) {
     int i = 0;
     int cursor_pos = 0;
@@ -443,12 +512,15 @@ void tread(char* buffer, int max_len) {
     }
 }
 
-// Shell command implementations
-void shell_help(void) {
+// ========== SHELL COMMAND IMPLEMENTATIONS ==========
+
+// Help Page 1 - Core commands
+void shell_help_page1(void) {
     tsetcolor(COLOR_LIGHT_CYAN);
-    twrite("\nAvailable commands:\n");
+    twrite("\n=== BRASH Help - Page 1/2 (Core Commands) ===\n");
     tsetcolor(COLOR_WHITE);
     twrite("  help          - Show this help message\n");
+    twrite("  help2         - Show page 2\n");
     twrite("  echo [text]   - Echo text back\n");
     twrite("  clear         - Clear the screen\n");
     twrite("  neofetch      - Display system info\n");
@@ -459,8 +531,6 @@ void shell_help(void) {
     twrite("  touch [file]  - Create empty file\n");
     twrite("  mkdir [dir]   - Create directory\n");
     twrite("  rm [file]     - Remove file/directory\n");
-    twrite("  exfat info    - Show exFAT info\n");
-    twrite("  exfat ls [path] - List exFAT directory\n");
     twrite("  reboot        - Reboot the system\n");
     twrite("  halt          - Halt the system\n");
     twrite("  status        - Show system status\n");
@@ -469,8 +539,54 @@ void shell_help(void) {
     twrite("  about         - Show about BRASH\n");
     twrite("  whoami        - Display current user\n");
     twrite("  uptime        - Show system uptime\n");
+    twrite("  exit/quit     - Exit shell\n");
+    tsetcolor(COLOR_YELLOW);
+    twrite("\n  Type 'help2' for driver commands\n");
     tsetcolor(COLOR_GREEN);
-    twrite("\nBRASH is POSIX compliant!\n");
+    twrite("  BRASH is POSIX compliant!\n");
+}
+
+// Help Page 2 - Driver commands
+void shell_help_page2(void) {
+    tsetcolor(COLOR_LIGHT_CYAN);
+    twrite("\n=== BRASH Help - Page 2/2 (Driver Commands) ===\n");
+    tsetcolor(COLOR_WHITE);
+    twrite("  exfat info    - Show exFAT info\n");
+    twrite("  exfat ls [path] - List exFAT directory\n");
+    twrite("  disk list     - List disk devices\n");
+    twrite("  disk automount - Auto-mount partitions\n");
+    twrite("  disk mount [disk] [part] - Mount partition\n");
+    twrite("  disk info [disk] - Disk information\n");
+    twrite("  usb list      - List USB devices\n");
+    twrite("  usb info      - USB system info\n");
+    twrite("  pcie list     - List PCIe devices\n");
+    twrite("  pcie info     - PCIe system info\n");
+    twrite("  audio list    - List audio devices\n");
+    twrite("  audio test    - Test audio\n");
+    twrite("  audio play [freq] [ms] - Play tone\n");
+    twrite("  net list      - List network devices\n");
+    twrite("  net info      - Network info\n");
+    twrite("  net ping [ip] - Ping an IP\n");
+    twrite("  wifi scan     - Scan WiFi networks\n");
+    twrite("  wifi connect [ssid] [pass] - Connect WiFi\n");
+    twrite("  download [url] - Download file\n");
+    twrite("  wget [url]    - Download file alias\n");
+    tsetcolor(COLOR_YELLOW);
+    twrite("\n  Type 'help' for core commands\n");
+    tsetcolor(COLOR_GREEN);
+    twrite("  BRASH is POSIX compliant!\n");
+}
+
+// Main help command - shows page 1 by default
+void shell_help(void) {
+    help_page = 1;
+    shell_help_page1();
+}
+
+// Help2 command - shows page 2
+void shell_help2(void) {
+    help_page = 2;
+    shell_help_page2();
 }
 
 void shell_echo(char* args) {
@@ -608,7 +724,8 @@ void shell_neofetch(void) {
     tsetcolor(COLOR_WHITE);
 }
 
-// File system commands
+// ========== FILE SYSTEM COMMANDS ==========
+
 void shell_ls(char* args) {
     char path[256];
     if (args && args[0]) {
@@ -748,6 +865,8 @@ void shell_pwd(void) {
     tsetcolor(COLOR_WHITE);
 }
 
+// ========== EXFAT COMMANDS ==========
+
 void shell_exfat_cmd(char* args) {
     if (!args || !args[0]) {
         twrite("Usage: exfat info | ls [path]\n");
@@ -786,6 +905,423 @@ void shell_exfat_cmd(char* args) {
     }
 }
 
+// ========== DISK COMMANDS ==========
+
+void shell_disk_list(void) {
+    disk_print_all();
+}
+
+void shell_disk_automount(void) {
+    disk_auto_mount_all();
+}
+
+void shell_disk_mount(char* args) {
+    char* ptr = args;
+    while (*ptr && *ptr != ' ') ptr++;
+    if (!*ptr) {
+        tsetcolor(COLOR_RED);
+        twrite("Usage: disk mount [disk] [partition]\n");
+        tsetcolor(COLOR_WHITE);
+        return;
+    }
+    *ptr = '\0';
+    char* disk_str = args;
+    char* part_str = ptr + 1;
+    
+    int disk_id = 0;
+    while (*disk_str >= '0' && *disk_str <= '9') {
+        disk_id = disk_id * 10 + (*disk_str - '0');
+        disk_str++;
+    }
+    
+    int part_id = 0;
+    while (*part_str >= '0' && *part_str <= '9') {
+        part_id = part_id * 10 + (*part_str - '0');
+        part_str++;
+    }
+    
+    disk_mount_partition(disk_id, part_id);
+}
+
+void shell_disk_info(char* args) {
+    char* ptr = args;
+    while (*ptr && *ptr != ' ') ptr++;
+    if (!*ptr) {
+        tsetcolor(COLOR_RED);
+        twrite("Usage: disk info [disk]\n");
+        tsetcolor(COLOR_WHITE);
+        return;
+    }
+    
+    int disk_id = 0;
+    char* num_str = args;
+    while (*num_str >= '0' && *num_str <= '9') {
+        disk_id = disk_id * 10 + (*num_str - '0');
+        num_str++;
+    }
+    
+    disk_t* disk = disk_get(disk_id);
+    if (!disk || !disk->present) {
+        tsetcolor(COLOR_RED);
+        twrite("Disk not found\n");
+        tsetcolor(COLOR_WHITE);
+        return;
+    }
+    
+    tsetcolor(COLOR_CYAN);
+    twrite("\n=== Disk Info ===\n");
+    tsetcolor(COLOR_WHITE);
+    twrite("  Name: ");
+    twrite(disk->name);
+    twrite("\n");
+    twrite("  Type: ");
+    if (disk->type == DISK_TYPE_USB) twrite("USB");
+    else if (disk->type == DISK_TYPE_ATA) twrite("ATA");
+    else twrite("Unknown");
+    twrite("\n");
+    twrite("  Sector Size: ");
+    char str[16];
+    uint32_to_str(disk->sector_size, str);
+    twrite(str);
+    twrite(" bytes\n");
+    twrite("  Total Sectors: ");
+    char str2[32];
+    uint64_to_str(disk->total_sectors, str2);
+    twrite(str2);
+    twrite("\n");
+    twrite("  Partitions: ");
+    uint32_to_str(disk->partition_count, str);
+    twrite(str);
+    twrite("\n");
+    twrite("==================\n");
+}
+
+// ========== USB COMMANDS ==========
+
+void shell_usb_list(void) {
+    static int usb_initialized = 0;
+    if (!usb_initialized) {
+        usb_init();
+        usb_initialized = 1;
+    }
+    usb_print_devices();
+}
+
+void shell_usb_info(void) {
+    tsetcolor(COLOR_CYAN);
+    twrite("\n=== USB System Info ===\n");
+    tsetcolor(COLOR_WHITE);
+    twrite("  USB Driver: Initialized\n");
+    char str[16];
+    uint32_to_str(usb_get_controller_count(), str);
+    twrite("  Controllers: ");
+    twrite(str);
+    twrite("\n");
+    twrite("  Devices: ");
+    uint32_to_str(usb_get_device_count(), str);
+    twrite(str);
+    twrite("\n");
+    tsetcolor(COLOR_GREEN);
+    twrite("  Status: OK\n");
+    twrite("========================\n");
+}
+
+// ========== PCIE COMMANDS ==========
+
+void shell_pcie_list(void) {
+    static int pcie_initialized = 0;
+    if (!pcie_initialized) {
+        pcie_init();
+        pcie_initialized = 1;
+    }
+    pcie_print_all_devices();
+}
+
+void shell_pcie_info(void) {
+    tsetcolor(COLOR_CYAN);
+    twrite("\n=== PCIe System Info ===\n");
+    tsetcolor(COLOR_WHITE);
+    twrite("  PCIe Driver: Initialized\n");
+    twrite("  Max Devices: 256\n");
+    char str[16];
+    uint32_to_str(pcie_get_device_count(), str);
+    twrite("  Devices Found: ");
+    twrite(str);
+    twrite("\n");
+    twrite("  Architecture: x86\n");
+    tsetcolor(COLOR_GREEN);
+    twrite("  Status: OK\n");
+    twrite("========================\n");
+}
+
+// ========== AUDIO COMMANDS ==========
+
+void shell_audio_list(void) {
+    static int audio_initialized = 0;
+    if (!audio_initialized) {
+        audio_init();
+        audio_initialized = 1;
+    }
+    audio_print_devices();
+}
+
+void shell_audio_test(void) {
+    tsetcolor(COLOR_GREEN);
+    twrite("Testing audio...\n");
+    tsetcolor(COLOR_WHITE);
+    
+    tsetcolor(COLOR_YELLOW);
+    twrite("PC Speaker beep (440Hz, 200ms)...\n");
+    audio_pc_speaker_beep(440, 200);
+    
+    audio_init();
+    int count = audio_get_device_count();
+    
+    if (count > 0) {
+        tsetcolor(COLOR_GREEN);
+        twrite("Found audio device, playing tone...\n");
+        tsetcolor(COLOR_WHITE);
+        
+        audio_device_t* dev = audio_get_device(0);
+        if (dev && dev->present) {
+            audio_play_tone(dev, 440, 500);
+            twrite("440Hz tone played\n");
+        }
+    } else {
+        tsetcolor(COLOR_YELLOW);
+        twrite("No PCIe audio devices found, using PC speaker only\n");
+        tsetcolor(COLOR_WHITE);
+    }
+}
+
+void shell_audio_play(char* args) {
+    uint32_t frequency = 440;
+    uint32_t duration = 500;
+    
+    if (args && args[0]) {
+        char* freq_str = args;
+        char* dur_str = NULL;
+        
+        char* space = args;
+        while (*space && *space != ' ') space++;
+        if (*space) {
+            *space = '\0';
+            dur_str = space + 1;
+            while (*dur_str == ' ') dur_str++;
+        }
+        
+        if (freq_str[0]) {
+            frequency = 0;
+            while (*freq_str) {
+                frequency = frequency * 10 + (*freq_str - '0');
+                freq_str++;
+            }
+        }
+        
+        if (dur_str && dur_str[0]) {
+            duration = 0;
+            while (*dur_str) {
+                duration = duration * 10 + (*dur_str - '0');
+                dur_str++;
+            }
+        }
+    }
+    
+    char freq_str[16];
+    uint32_to_str(frequency, freq_str);
+    char dur_str[16];
+    uint32_to_str(duration, dur_str);
+    
+    tsetcolor(COLOR_GREEN);
+    twrite("Playing tone: ");
+    twrite(freq_str);
+    twrite("Hz for ");
+    twrite(dur_str);
+    twrite("ms\n");
+    tsetcolor(COLOR_WHITE);
+    
+    audio_pc_speaker_beep(frequency, duration);
+    
+    audio_init();
+    int count = audio_get_device_count();
+    if (count > 0) {
+        audio_device_t* dev = audio_get_device(0);
+        if (dev && dev->present) {
+            audio_play_tone(dev, frequency, duration);
+        }
+    }
+}
+
+// ========== NETWORK COMMANDS ==========
+
+void shell_net_list(void) {
+    static int net_initialized = 0;
+    if (!net_initialized) {
+        net_init();
+        net_initialized = 1;
+    }
+    net_print_devices();
+}
+
+void shell_net_info(void) {
+    tsetcolor(COLOR_CYAN);
+    twrite("\n=== Network Info ===\n");
+    tsetcolor(COLOR_WHITE);
+    twrite("  Driver: Initialized\n");
+    char str[16];
+    uint32_to_str(net_get_device_count(), str);
+    twrite("  Devices: ");
+    twrite(str);
+    twrite("\n");
+    tsetcolor(COLOR_GREEN);
+    twrite("  Status: OK\n");
+    twrite("====================\n");
+}
+
+void shell_net_ping(char* args) {
+    if (!args || !args[0]) {
+        tsetcolor(COLOR_RED);
+        twrite("Usage: net ping [ip]\n");
+        tsetcolor(COLOR_WHITE);
+        return;
+    }
+    
+    uint32_t ip = 0;
+    uint32_t octet = 0;
+    int octet_count = 0;
+    char* p = args;
+    
+    while (*p && octet_count < 4) {
+        if (*p >= '0' && *p <= '9') {
+            octet = octet * 10 + (*p - '0');
+        } else if (*p == '.') {
+            ip = (ip << 8) | octet;
+            octet = 0;
+            octet_count++;
+        }
+        p++;
+    }
+    ip = (ip << 8) | octet;
+    
+    tsetcolor(COLOR_GREEN);
+    twrite("Pinging ");
+    twrite(args);
+    twrite("...\n");
+    tsetcolor(COLOR_WHITE);
+    
+    net_device_t* dev = net_get_device(0);
+    if (dev && dev->present) {
+        net_send_icmp_echo(dev, ip);
+        twrite("ICMP Echo sent\n");
+    } else {
+        twrite("No network device available\n");
+    }
+}
+
+// ========== WIFI COMMANDS ==========
+
+void shell_wifi_scan(void) {
+    net_device_t* dev = net_get_device(0);
+    if (dev && dev->present && dev->type == NET_TYPE_WIFI) {
+        wifi_scan(dev);
+    } else {
+        tsetcolor(COLOR_YELLOW);
+        twrite("No WiFi device found\n");
+        tsetcolor(COLOR_WHITE);
+    }
+}
+
+void shell_wifi_connect(char* args) {
+    if (!args || !args[0]) {
+        tsetcolor(COLOR_RED);
+        twrite("Usage: wifi connect [ssid] [password]\n");
+        tsetcolor(COLOR_WHITE);
+        return;
+    }
+    
+    char ssid[64];
+    char password[64];
+    int i = 0;
+    
+    while (args[i] && args[i] != ' ' && i < 63) {
+        ssid[i] = args[i];
+        i++;
+    }
+    ssid[i] = '\0';
+    
+    if (args[i] == ' ') {
+        i++;
+        int j = 0;
+        while (args[i] && j < 63) {
+            password[j++] = args[i++];
+        }
+        password[j] = '\0';
+    } else {
+        password[0] = '\0';
+    }
+    
+    net_device_t* dev = net_get_device(0);
+    if (dev && dev->present && dev->type == NET_TYPE_WIFI) {
+        wifi_connect(dev, ssid, password);
+    } else {
+        tsetcolor(COLOR_YELLOW);
+        twrite("No WiFi device found\n");
+        tsetcolor(COLOR_WHITE);
+    }
+}
+
+// ========== DOWNLOAD COMMANDS ==========
+
+void shell_download(char* args) {
+    if (!args || !args[0]) {
+        tsetcolor(COLOR_RED);
+        twrite("Usage: download [url]\n");
+        twrite("Example: download http://example.com/file.txt\n");
+        tsetcolor(COLOR_WHITE);
+        return;
+    }
+    
+    char filename[256];
+    char* last_slash = args;
+    char* p = args;
+    while (*p) {
+        if (*p == '/') last_slash = p + 1;
+        p++;
+    }
+    
+    if (last_slash && *last_slash) {
+        strcpy(filename, last_slash);
+        p = filename;
+        while (*p && *p != '?' && *p != '#') p++;
+        *p = '\0';
+    } else {
+        strcpy(filename, "downloaded_file");
+    }
+    
+    static int net_initialized = 0;
+    if (!net_initialized) {
+        net_init();
+        net_initialized = 1;
+    }
+    
+    int result = http_download_file(args, filename);
+    
+    if (result != 0) {
+        tsetcolor(COLOR_RED);
+        twrite("Download failed with error: ");
+        char err_str[8];
+        uint32_to_str(-result, err_str);
+        twrite(err_str);
+        twrite("\n");
+        tsetcolor(COLOR_WHITE);
+        twrite("Make sure you have network connectivity\n");
+    }
+}
+
+void shell_wget(char* args) {
+    shell_download(args);
+}
+
 void shell_prompt(void) {
     tsetcolor(COLOR_YELLOW);
     twrite("root@CardboardOS~$ ");
@@ -810,7 +1346,7 @@ void shell_init(void) {
     twrite("  Type 'help' for available commands\n\n");
 }
 
-// FIXED: Execute shell command with simple parsing
+// Execute shell command with simple parsing
 void shell_execute(char* cmd) {
     // Skip leading spaces
     while (*cmd == ' ') cmd++;
@@ -840,18 +1376,12 @@ void shell_execute(char* cmd) {
     }
     args[i] = '\0';
     
-    // Debug output
-    tsetcolor(COLOR_LIGHT_GRAY);
-    twrite("[DEBUG] cmd='");
-    twrite(command);
-    twrite("' args='");
-    twrite(args);
-    twrite("'\n");
-    tsetcolor(COLOR_WHITE);
-    
     // Execute command
     if (strcmp(command, "help") == 0 || strcmp(command, "?") == 0) {
         shell_help();
+    }
+    else if (strcmp(command, "help2") == 0) {
+        shell_help2();
     }
     else if (strcmp(command, "echo") == 0) {
         shell_echo(args);
@@ -885,6 +1415,83 @@ void shell_execute(char* cmd) {
     }
     else if (strcmp(command, "exfat") == 0) {
         shell_exfat_cmd(args);
+    }
+    else if (strcmp(command, "disk") == 0) {
+        if (strcmp(args, "list") == 0 || strcmp(args, "ls") == 0) {
+            shell_disk_list();
+        } else if (strcmp(args, "automount") == 0) {
+            shell_disk_automount();
+        } else if (strncmp(args, "mount ", 6) == 0) {
+            shell_disk_mount(args + 6);
+        } else if (strncmp(args, "info ", 5) == 0) {
+            shell_disk_info(args + 5);
+        } else {
+            tsetcolor(COLOR_YELLOW);
+            twrite("Usage: disk list | automount | mount [disk] [part] | info [disk]\n");
+            tsetcolor(COLOR_WHITE);
+        }
+    }
+    else if (strcmp(command, "usb") == 0) {
+        if (strcmp(args, "list") == 0 || strcmp(args, "ls") == 0) {
+            shell_usb_list();
+        } else if (strcmp(args, "info") == 0) {
+            shell_usb_info();
+        } else {
+            tsetcolor(COLOR_YELLOW);
+            twrite("Usage: usb list | info\n");
+            tsetcolor(COLOR_WHITE);
+        }
+    }
+    else if (strcmp(command, "pcie") == 0) {
+        if (strcmp(args, "list") == 0 || strcmp(args, "ls") == 0) {
+            shell_pcie_list();
+        } else if (strcmp(args, "info") == 0) {
+            shell_pcie_info();
+        } else {
+            tsetcolor(COLOR_YELLOW);
+            twrite("Usage: pcie list | info\n");
+            tsetcolor(COLOR_WHITE);
+        }
+    }
+    else if (strcmp(command, "audio") == 0) {
+        if (strcmp(args, "list") == 0 || strcmp(args, "ls") == 0) {
+            shell_audio_list();
+        } else if (strcmp(args, "test") == 0) {
+            shell_audio_test();
+        } else if (strncmp(args, "play ", 5) == 0) {
+            shell_audio_play(args + 5);
+        } else {
+            tsetcolor(COLOR_YELLOW);
+            twrite("Usage: audio list | test | play [freq] [ms]\n");
+            tsetcolor(COLOR_WHITE);
+        }
+    }
+    else if (strcmp(command, "net") == 0) {
+        if (strcmp(args, "list") == 0 || strcmp(args, "ls") == 0) {
+            shell_net_list();
+        } else if (strcmp(args, "info") == 0) {
+            shell_net_info();
+        } else if (strncmp(args, "ping ", 5) == 0) {
+            shell_net_ping(args + 5);
+        } else {
+            tsetcolor(COLOR_YELLOW);
+            twrite("Usage: net list | info | ping [ip]\n");
+            tsetcolor(COLOR_WHITE);
+        }
+    }
+    else if (strcmp(command, "wifi") == 0) {
+        if (strcmp(args, "scan") == 0) {
+            shell_wifi_scan();
+        } else if (strncmp(args, "connect ", 8) == 0) {
+            shell_wifi_connect(args + 8);
+        } else {
+            tsetcolor(COLOR_YELLOW);
+            twrite("Usage: wifi scan | connect [ssid] [password]\n");
+            tsetcolor(COLOR_WHITE);
+        }
+    }
+    else if (strcmp(command, "download") == 0 || strcmp(command, "wget") == 0) {
+        shell_download(args);
     }
     else if (strcmp(command, "reboot") == 0) {
         shell_reboot();

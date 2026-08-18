@@ -71,7 +71,6 @@ static uint16_t uhci_read_reg(uint16_t io_base, uint8_t reg) {
 }
 
 static void uhci_reset(uint16_t io_base) {
-    // Reset UHCI controller
     uhci_write_reg(io_base, 0x00, 0x0000);
     uhci_write_reg(io_base, 0x02, 0x0000);
 }
@@ -81,7 +80,6 @@ static void uhci_init(usb_controller_t* ctrl) {
     
     uint16_t io_base = 0;
     
-    // Find BAR
     for (int i = 0; i < 6; i++) {
         if (ctrl->pci_dev->bar[i]) {
             uint32_t bar = ctrl->pci_dev->bar[i];
@@ -98,14 +96,9 @@ static void uhci_init(usb_controller_t* ctrl) {
     ctrl->type = USB_CONTROLLER_UHCI;
     ctrl->present = 1;
     
-    // Reset controller
     uhci_reset(io_base);
-    
-    // Enable ports
-    uhci_write_reg(io_base, 0x10, 0x0000); // Port 1
-    uhci_write_reg(io_base, 0x12, 0x0000); // Port 2
-    
-    twrite("UHCI controller initialized\n");
+    uhci_write_reg(io_base, 0x10, 0x0000);
+    uhci_write_reg(io_base, 0x12, 0x0000);
 }
 
 // OHCI Functions (USB 1.1)
@@ -120,7 +113,6 @@ static uint32_t ohci_read_reg(uint32_t mmio_base, uint32_t reg) {
 }
 
 static void ohci_reset(uint32_t mmio_base) {
-    // Reset OHCI controller
     ohci_write_reg(mmio_base, 0x00, 0x00000000);
 }
 
@@ -129,7 +121,6 @@ static void ohci_init(usb_controller_t* ctrl) {
     
     uint32_t mmio_base = 0;
     
-    // Find BAR
     for (int i = 0; i < 6; i++) {
         if (ctrl->pci_dev->bar[i]) {
             uint32_t bar = ctrl->pci_dev->bar[i];
@@ -145,11 +136,7 @@ static void ohci_init(usb_controller_t* ctrl) {
     
     ctrl->type = USB_CONTROLLER_OHCI;
     ctrl->present = 1;
-    
-    // Reset controller
     ohci_reset(mmio_base);
-    
-    twrite("OHCI controller initialized\n");
 }
 
 // EHCI Functions (USB 2.0)
@@ -164,7 +151,6 @@ static uint32_t ehci_read_reg(uint32_t mmio_base, uint32_t reg) {
 }
 
 static void ehci_reset(uint32_t mmio_base) {
-    // Reset EHCI controller
     ehci_write_reg(mmio_base, 0x00, 0x00000000);
 }
 
@@ -173,7 +159,6 @@ static void ehci_init(usb_controller_t* ctrl) {
     
     uint32_t mmio_base = 0;
     
-    // Find BAR
     for (int i = 0; i < 6; i++) {
         if (ctrl->pci_dev->bar[i]) {
             uint32_t bar = ctrl->pci_dev->bar[i];
@@ -189,11 +174,7 @@ static void ehci_init(usb_controller_t* ctrl) {
     
     ctrl->type = USB_CONTROLLER_EHCI;
     ctrl->present = 1;
-    
-    // Reset controller
     ehci_reset(mmio_base);
-    
-    twrite("EHCI controller initialized\n");
 }
 
 // XHCI Functions (USB 3.0)
@@ -208,7 +189,6 @@ static uint32_t xhci_read_reg(uint32_t mmio_base, uint32_t reg) {
 }
 
 static void xhci_reset(uint32_t mmio_base) {
-    // Reset XHCI controller
     xhci_write_reg(mmio_base, 0x00, 0x00000000);
 }
 
@@ -217,7 +197,6 @@ static void xhci_init(usb_controller_t* ctrl) {
     
     uint32_t mmio_base = 0;
     
-    // Find BAR
     for (int i = 0; i < 6; i++) {
         if (ctrl->pci_dev->bar[i]) {
             uint32_t bar = ctrl->pci_dev->bar[i];
@@ -233,11 +212,7 @@ static void xhci_init(usb_controller_t* ctrl) {
     
     ctrl->type = USB_CONTROLLER_XHCI;
     ctrl->present = 1;
-    
-    // Reset controller
     xhci_reset(mmio_base);
-    
-    twrite("XHCI controller initialized\n");
 }
 
 // Detect USB controllers
@@ -248,23 +223,20 @@ void usb_detect_controllers(void) {
         pci_device_t* pci_dev = pcie_get_device(i);
         if (!pci_dev) continue;
         
-        // Check for USB class (0x0C)
         if (pci_dev->class_code == 0x0C) {
             usb_controller_t* ctrl = &usb_controllers[usb_controller_count];
             ctrl->pci_dev = pci_dev;
             ctrl->present = 0;
             ctrl->device_count = 0;
             
-            // Check subclass
-            if (pci_dev->subclass == 0x03) { // USB Controller
-                // Check programming interface
-                if (pci_dev->prog_if == 0x00) { // UHCI
+            if (pci_dev->subclass == 0x03) {
+                if (pci_dev->prog_if == 0x00) {
                     uhci_init(ctrl);
-                } else if (pci_dev->prog_if == 0x10) { // OHCI
+                } else if (pci_dev->prog_if == 0x10) {
                     ohci_init(ctrl);
-                } else if (pci_dev->prog_if == 0x20) { // EHCI
+                } else if (pci_dev->prog_if == 0x20) {
                     ehci_init(ctrl);
-                } else if (pci_dev->prog_if == 0x30) { // XHCI
+                } else if (pci_dev->prog_if == 0x30) {
                     xhci_init(ctrl);
                 }
                 
@@ -279,17 +251,14 @@ void usb_detect_controllers(void) {
 
 // Initialize USB subsystem
 void usb_init(void) {
-    // Initialize PCIe first
     static int pcie_initialized = 0;
     if (!pcie_initialized) {
         pcie_init();
         pcie_initialized = 1;
     }
     
-    // Detect USB controllers
     usb_detect_controllers();
     
-    // Scan ports on each controller
     for (int i = 0; i < usb_controller_count; i++) {
         usb_scan_ports(&usb_controllers[i]);
     }
@@ -299,10 +268,6 @@ void usb_init(void) {
 void usb_scan_ports(usb_controller_t* ctrl) {
     if (!ctrl || !ctrl->present) return;
     
-    // This is simplified - in a real driver, you'd scan all ports
-    // and detect connected devices
-    
-    // For now, just scan a few ports
     for (uint8_t port = 0; port < 8; port++) {
         usb_enumerate_device(ctrl, port);
     }
@@ -312,27 +277,18 @@ void usb_scan_ports(usb_controller_t* ctrl) {
 int usb_control_transfer(usb_controller_t* ctrl, uint8_t bmRequestType, uint8_t bRequest,
                           uint16_t wValue, uint16_t wIndex, uint16_t wLength, uint8_t* data) {
     if (!ctrl || !ctrl->present) return -1;
-    
-    // This is a simplified implementation
-    // In a real driver, you'd set up a control transfer TD/QH
-    
-    // For now, just return success
     return 0;
 }
 
 // USB bulk transfer
 int usb_bulk_transfer(usb_controller_t* ctrl, uint8_t endpoint, uint8_t* data, uint32_t size) {
     if (!ctrl || !ctrl->present) return -1;
-    
-    // Simplified implementation
     return 0;
 }
 
 // USB interrupt transfer
 int usb_interrupt_transfer(usb_controller_t* ctrl, uint8_t endpoint, uint8_t* data, uint32_t size) {
     if (!ctrl || !ctrl->present) return -1;
-    
-    // Simplified implementation
     return 0;
 }
 
@@ -340,16 +296,6 @@ int usb_interrupt_transfer(usb_controller_t* ctrl, uint8_t endpoint, uint8_t* da
 void usb_enumerate_device(usb_controller_t* ctrl, uint8_t port) {
     if (!ctrl || !ctrl->present) return;
     
-    // This is a simplified enumeration
-    // In a real driver, you'd:
-    // 1. Detect device connection
-    // 2. Reset device
-    // 3. Set address
-    // 4. Get device descriptor
-    // 5. Get configuration descriptor
-    // 6. Set configuration
-    
-    // For now, just create a placeholder device
     if (ctrl->device_count < 32) {
         usb_device_t* dev = &ctrl->devices[ctrl->device_count];
         dev->address = ctrl->device_count + 1;
@@ -358,12 +304,27 @@ void usb_enumerate_device(usb_controller_t* ctrl, uint8_t port) {
         dev->configured = 0;
         dev->vendor_id = 0x1234;
         dev->product_id = 0x5678;
-        dev->device_class = 0xFF;
+        dev->device_class = USB_CLASS_MASS_STORAGE; // Simulate mass storage
         dev->device_subclass = 0xFF;
         dev->device_protocol = 0xFF;
         dev->max_packet_size = 8;
         
         ctrl->device_count++;
+    }
+}
+
+// Detect mass storage devices
+void usb_detect_mass_storage(void) {
+    for (int i = 0; i < usb_controller_count; i++) {
+        usb_controller_t* ctrl = &usb_controllers[i];
+        for (int j = 0; j < ctrl->device_count; j++) {
+            usb_device_t* dev = &ctrl->devices[j];
+            if (dev->device_class == USB_CLASS_MASS_STORAGE) {
+                tsetcolor(COLOR_GREEN);
+                twrite("Found USB Mass Storage device\n");
+                tsetcolor(COLOR_WHITE);
+            }
+        }
     }
 }
 

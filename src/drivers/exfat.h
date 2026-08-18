@@ -2,16 +2,18 @@
 #ifndef _EXFAT_H
 #define _EXFAT_H
 
-// Custom types for freestanding environment
-typedef unsigned char uint8_t;
-typedef unsigned short uint16_t;
-typedef unsigned int uint32_t;
-typedef unsigned long long uint64_t;
+#include "disk.h"
 
 // NULL definition for freestanding environment
 #ifndef NULL
 #define NULL ((void*)0)
 #endif
+
+// Basic types
+typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
+typedef unsigned int uint32_t;
+typedef unsigned long long uint64_t;
 
 // exFAT Structures
 typedef struct {
@@ -78,22 +80,25 @@ typedef struct {
 #define EXFAT_ENTRY_TYPE_BITMAP       0x81
 #define EXFAT_ENTRY_TYPE_VOLUME       0x83
 
+// Partition type
+#define PARTITION_TYPE_EXFAT    0x07
+
 // exFAT Driver Functions
 int exfat_init(void);
+int exfat_mount_from_disk(int disk_id, int partition_index);
 int exfat_read_file(const char* path, uint8_t* buffer, uint32_t max_size);
 int exfat_read_cluster(uint32_t cluster, uint8_t* buffer);
 uint32_t exfat_cluster_to_sector(uint32_t cluster);
 uint32_t exfat_get_next_cluster(uint32_t cluster);
 void exfat_print_info(void);
 int exfat_list_directory(const char* path);
-
-// External functions from kernel
-void tputchar(char c);
-void twrite(const char* data);
-void tsetcolor(unsigned char color);
-void* malloc(unsigned int size);
-void free(void* ptr);
-int strcmp(const char* s1, const char* s2);
-void strcpy(char* dest, const char* src);
+int exfat_is_mounted(void);
+exfat_boot_sector_t* exfat_get_boot_sector(void);
+int exfat_create_file(const char* path, uint8_t attributes);
+int exfat_delete_file(const char* path);
+int exfat_create_directory(const char* path);
+uint64_t exfat_get_file_size(const char* path);
+int exfat_file_exists(const char* path);
+uint64_t exfat_get_free_space(void);
 
 #endif // _EXFAT_H
