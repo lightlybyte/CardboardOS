@@ -96,12 +96,22 @@ def detect_toolchain():
         print_color("Error: No linker found (ld, ld.lld, or lld-link)", Colors.RED)
         sys.exit(1)
     
+    # Detect if using MSVC-like clang
+    use_gnu_target = False
+    if is_windows and 'clang' in cc:
+        # Check if clang can target GNU
+        result = subprocess.run([cc, '--target=i386-pc-elf', '--print-target-triple'], 
+                              capture_output=True, text=True)
+        if 'i386-pc-elf' in result.stdout:
+            use_gnu_target = True
+    
     return {
         'nasm': nasm_path,
         'cc': cc,
         'linker': linker,
         'is_windows': is_windows,
-        'system': system
+        'system': system,
+        'use_gnu_target': use_gnu_target
     }
 
 def build_kernel(toolchain, src_dir, output_dir):
@@ -128,7 +138,6 @@ def build_kernel(toolchain, src_dir, output_dir):
         toolchain['cc'],
         '-m32',
         '-ffreestanding',
-        '-fno-pie',
         '-nostdlib',
         '-c',
         str(src_dir / 'kmain.c'),
@@ -137,11 +146,16 @@ def build_kernel(toolchain, src_dir, output_dir):
     
     # Add Windows-specific flags
     if toolchain['is_windows']:
-        # For Windows, add these flags for compatibility
-        cc_cmd.extend(['-target', 'i386-pc-windows-msvc'])
-        # Remove -fno-pie if clang doesn't support it
+        # Force ELF output on Windows
         if 'clang' in toolchain['cc']:
-            cc_cmd.remove('-fno-pie')
+            # Use GNU target for ELF output
+            cc_cmd.extend(['--target=i386-pc-elf'])
+            # Remove -fno-pie if clang doesn't support it
+            cc_cmd.remove('-ffreestanding')  # clang uses -ffreestanding but may conflict
+            cc_cmd.insert(cc_cmd.index('-m32') + 1, '-ffreestanding')
+        else:
+            # For GCC on Windows (MinGW)
+            cc_cmd.append('-ffreestanding')
     
     run_command(cc_cmd)
     
