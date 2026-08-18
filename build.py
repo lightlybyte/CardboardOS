@@ -106,7 +106,7 @@ def detect_toolchain():
 
 def build_kernel(toolchain, src_dir, output_dir):
     """Build the kernel binary"""
-    print_color(f"\n{BOLD}Building kernel...{Colors.RESET}", Colors.BLUE)
+    print_color(f"\n{Colors.BOLD}Building kernel...{Colors.RESET}", Colors.BLUE)
     
     # Create output directory
     output_dir.mkdir(exist_ok=True)
@@ -197,7 +197,7 @@ def build_kernel(toolchain, src_dir, output_dir):
 
 def create_iso(toolchain, kernel_bin, output_dir, stage2_path):
     """Create bootable ISO with GRUB 0.95"""
-    print_color(f"\n{BOLD}Creating ISO image...{Colors.RESET}", Colors.BLUE)
+    print_color(f"\n{Colors.BOLD}Creating ISO image...{Colors.RESET}", Colors.BLUE)
     
     # Create ISO directory structure
     iso_dir = output_dir / 'iso'
@@ -328,7 +328,7 @@ menuentry "My C Kernel" {
 
 def main():
     """Main build function"""
-    print_color(f"{BOLD}=== Bootloader Build System ==={Colors.RESET}", Colors.MAGENTA)
+    print_color(f"{Colors.BOLD}=== Bootloader Build System ==={Colors.RESET}", Colors.MAGENTA)
     print_color(f"Platform: {platform.system()} {platform.release()}", Colors.CYAN)
     
     # Setup directories
@@ -389,11 +389,11 @@ def main():
     iso_path = create_iso(toolchain, kernel_bin, output_dir, stage2_to_use)
     
     # Final success message
-    print_color(f"\n{BOLD}{Colors.GREEN}Build successful!{Colors.RESET}", Colors.GREEN)
+    print_color(f"\n{Colors.BOLD}{Colors.GREEN}Build successful!{Colors.RESET}", Colors.GREEN)
     print_color(f"Output: {iso_path}", Colors.GREEN)
     
     # Print usage instructions
-    print_color(f"\n{BOLD}To run in QEMU:{Colors.RESET}", Colors.CYAN)
+    print_color(f"\n{Colors.BOLD}To run in QEMU:{Colors.RESET}", Colors.CYAN)
     print(f"  qemu-system-i386 -cdrom {iso_path}")
     if iso_path.suffix == '.img':
         print(f"  qemu-system-i386 -fda {iso_path}")
@@ -401,7 +401,7 @@ def main():
     
     # Run in QEMU if requested
     if args.run:
-        print_color(f"\n{BOLD}Running in QEMU...{Colors.RESET}", Colors.BLUE)
+        print_color(f"\n{Colors.BOLD}Running in QEMU...{Colors.RESET}", Colors.BLUE)
         qemu_cmd = ['qemu-system-i386', '-cdrom', str(iso_path)]
         if iso_path.suffix == '.img':
             qemu_cmd = ['qemu-system-i386', '-fda', str(iso_path)]
