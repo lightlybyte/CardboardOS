@@ -2,16 +2,20 @@
 #ifndef _PCIE_H
 #define _PCIE_H
 
-// NULL definition for freestanding environment
-#ifndef NULL
-#define NULL ((void*)0)
-#endif
-
-// Basic types
+// Basic types - complete definitions
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned long long uint64_t;
+typedef signed char int8_t;
+typedef signed short int16_t;
+typedef signed int int32_t;
+typedef signed long long int64_t;
+
+// NULL definition
+#ifndef NULL
+#define NULL ((void*)0)
+#endif
 
 // PCI Configuration Space Registers
 #define PCI_VENDOR_ID           0x00
@@ -125,5 +129,7 @@ pci_device_t* pcie_find_device(uint16_t vendor_id, uint16_t device_id);
 pci_device_t* pcie_find_class(uint8_t class_code, uint8_t subclass);
 int pcie_get_bar_type(uint32_t bar);
 uint32_t pcie_get_bar_address(uint32_t bar);
+int pcie_get_device_count(void);
+pci_device_t* pcie_get_device(int index);
 
 #endif // _PCIE_H
