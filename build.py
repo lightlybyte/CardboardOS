@@ -229,7 +229,7 @@ def create_iso(toolchain, kernel_bin, output_dir, stage2_path):
 timeout 5
 default 0
 
-title My C Kernel
+title CardboardOS v2026.8 - "Eclipse"
     kernel /boot/kernel.bin
     boot
 """)

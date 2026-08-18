@@ -36,6 +36,10 @@ void strcpy(char* dest, const char* src);
 void strcat(char* dest, const char* src);
 int strncmp(const char* s1, const char* s2, int n);
 
+// Keyboard functions
+unsigned char inb(unsigned short port);
+void outb(unsigned short port, unsigned char data);
+
 // Terminal state
 static int terminal_row;
 static int terminal_column;
@@ -65,6 +69,17 @@ static unsigned short* terminal_buffer;
 #define MAX_ARGS 16
 #define SHELL_NAME "BRASH"
 #define SHELL_VERSION "1.0"
+
+// Port I/O functions
+unsigned char inb(unsigned short port) {
+    unsigned char ret;
+    __asm__ volatile ("inb %1, %0" : "=a"(ret) : "Nd"(port));
+    return ret;
+}
+
+void outb(unsigned short port, unsigned char data) {
+    __asm__ volatile ("outb %0, %1" : : "a"(data), "Nd"(port));
+}
 
 // String functions implementation
 int strlen(const char* str) {
@@ -195,54 +210,77 @@ void twrite(const char* data) {
     terminal_write(data);
 }
 
+// Keyboard input functions
+unsigned char get_scancode(void) {
+    return inb(0x60);
+}
+
+int is_key_pressed(void) {
+    // Check if data is available in keyboard buffer
+    return inb(0x64) & 0x01;
+}
+
 // Input functions
 char tinput(void) {
     // Wait for a key press and return the character
     while (1) {
-        // Check if a key is pressed
-        __asm__ volatile("inb $0x64, %al");
-        // We can't actually read from keyboard this way in protected mode
-        // This is a placeholder - we'll use a simple polling method
-        
-        // For now, just return a space
-        // In a real kernel, you'd implement proper keyboard interrupts
-        return ' ';
+        if (is_key_pressed()) {
+            unsigned char scancode = get_scancode();
+            if (!(scancode & 0x80)) {
+                // Key pressed (not released)
+                // Convert scancode to ASCII (simplified)
+                if (scancode >= 0x10 && scancode <= 0x19) {
+                    const char* nums = "1234567890";
+                    return nums[scancode - 0x10];
+                }
+                else if (scancode >= 0x1E && scancode <= 0x26) {
+                    const char* letters = "abcdefghijklmnopqrstuvwxyz";
+                    int idx = scancode - 0x1E;
+                    if (idx < 26) {
+                        return letters[idx];
+                    }
+                }
+                else if (scancode == 0x1C) {
+                    return '\n';
+                }
+                else if (scancode == 0x39) {
+                    return ' ';
+                }
+                else if (scancode == 0x0E) {
+                    return '\b';
+                }
+            }
+        }
     }
 }
 
 void tread(char* buffer, int max_len) {
-    // Read a line of input from keyboard
-    // This is a simplified version that just reads from the keyboard port
     int i = 0;
     char c;
     
-    // Set cursor to input position
     tsetcolor(COLOR_WHITE);
     
     while (i < max_len - 1) {
-        // Wait for key press (simplified)
-        // In a real system, you'd use keyboard interrupts
-        // For now, we'll simulate with a delay and check
+        // Wait for key
+        while (!is_key_pressed()) {
+            // Small delay to prevent CPU spinning
+            for (volatile int delay = 0; delay < 100; delay++);
+        }
         
-        // Simple keyboard polling (works in QEMU)
-        unsigned char scancode;
-        __asm__ volatile("inb $0x60, %al" : "=a"(scancode));
+        unsigned char scancode = get_scancode();
         
+        // Ignore key releases
         if (scancode & 0x80) {
-            // Key released
             continue;
         }
         
-        // Convert scancode to ASCII (simplified)
-        // This is very simplified - only handles basic keys
-        if (scancode == 0x1C) {
-            // Enter key
+        // Convert scancode to ASCII
+        if (scancode == 0x1C) {  // Enter
             buffer[i] = '\0';
             tputchar('\n');
             return;
         }
-        else if (scancode == 0x0E) {
-            // Backspace
+        else if (scancode == 0x0E) {  // Backspace
             if (i > 0) {
                 i--;
                 tputchar('\b');
@@ -260,7 +298,6 @@ void tread(char* buffer, int max_len) {
             const char* letters = "abcdefghijklmnopqrstuvwxyz";
             int idx = scancode - 0x1E;
             if (idx < 26) {
-                // Check for shift (simplified - we'll just use lowercase)
                 c = letters[idx];
                 buffer[i++] = c;
                 tputchar(c);
@@ -271,9 +308,34 @@ void tread(char* buffer, int max_len) {
             buffer[i++] = ' ';
             tputchar(' ');
         }
-        
-        // Small delay to avoid reading the same key multiple times
-        for (volatile int delay = 0; delay < 100000; delay++);
+        else if (scancode == 0x2C) {  // Z
+            buffer[i++] = 'z';
+            tputchar('z');
+        }
+        else if (scancode == 0x2D) {  // X
+            buffer[i++] = 'x';
+            tputchar('x');
+        }
+        else if (scancode == 0x2E) {  // C
+            buffer[i++] = 'c';
+            tputchar('c');
+        }
+        else if (scancode == 0x2F) {  // V
+            buffer[i++] = 'v';
+            tputchar('v');
+        }
+        else if (scancode == 0x30) {  // B
+            buffer[i++] = 'b';
+            tputchar('b');
+        }
+        else if (scancode == 0x31) {  // N
+            buffer[i++] = 'n';
+            tputchar('n');
+        }
+        else if (scancode == 0x32) {  // M
+            buffer[i++] = 'm';
+            tputchar('m');
+        }
     }
     
     buffer[i] = '\0';
@@ -338,13 +400,7 @@ void shell_reboot(void) {
     tsetcolor(COLOR_RED);
     twrite("Rebooting system...\n");
     // Reboot using keyboard controller
-    __asm__ volatile (
-        "mov $0x64, %%al\n"
-        "outb %%al, $0x64\n"
-        "mov $0xFE, %%al\n"
-        "outb %%al, $0x64\n"
-        : : : "al"
-    );
+    outb(0x64, 0xFE);
     // If reboot fails, hang
     while(1) {
         __asm__ volatile("hlt");
@@ -428,7 +484,6 @@ void shell_execute(char* cmd) {
     char* args[MAX_ARGS];
     int arg_count = 0;
     char* token = cmd;
-    char* next_token;
     
     // Skip leading spaces
     while (*token == ' ') token++;
@@ -529,34 +584,8 @@ void kmain(void) {
     while (1) {
         shell_prompt();
         
-        // Read command
-        // In a real implementation, this would read from keyboard
-        // For now, we'll use a simple buffer with some built-in commands
-        
-        // This is a placeholder - in a real system you'd implement keyboard input
-        // For demonstration, we'll simulate some commands
-        static int demo_counter = 0;
-        demo_counter++;
-        
-        // Simple demo: after 3 loops, show available commands
-        if (demo_counter == 1) {
-            twrite("Type 'help' to see available commands\n");
-            // Simulate user typing 'help' on first run
-            // In a real system, this would be read from keyboard
-            // For now, just show the help
-            // shell_help();
-        }
-        
-        // In a real system, you'd do:
-        // tread(cmd, MAX_CMD_LEN);
-        // shell_execute(cmd);
-        
-        // For now, we'll just display that the shell is running
-        tsetcolor(COLOR_LIGHT_GRAY);
-        twrite("    [BRASH is ready. Type 'help' for commands]\n");
-        tsetcolor(COLOR_WHITE);
-        
-        // Wait a bit
-        for (volatile int i = 0; i < 5000000; i++);
+        // Read command from keyboard
+        tread(cmd, MAX_CMD_LEN);
+        shell_execute(cmd);
     }
 }
