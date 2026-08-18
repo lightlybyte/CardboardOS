@@ -3,6 +3,7 @@
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
 
+// NULL definition for freestanding environment
 #ifndef NULL
 #define NULL ((void*)0)
 #endif
@@ -273,7 +274,7 @@ void twrite(const char* data) {
 
 // Enhanced keyboard scancode to ASCII with shift support
 char scancode_to_ascii(unsigned char scancode, uint8_t shift) {
-    // Normal keymap
+    // Normal keymap (ASCII only)
     static const char normal_map[128] = {
         0,    0,    '1',  '2',  '3',  '4',  '5',  '6',
         '7',  '8',  '9',  '0',  '-',  '=',  '\b', '\t',
@@ -293,9 +294,9 @@ char scancode_to_ascii(unsigned char scancode, uint8_t shift) {
         0,    0,    0,    0,    0,    0,    0,    0
     };
     
-    // Shifted keymap
+    // Shifted keymap (ASCII only)
     static const char shift_map[128] = {
-        0,    0,    '!',  '"',  '£',  '$',  '%',  '^',
+        0,    0,    '!',  '"',  '#',  '$',  '%',  '^',
         '&',  '*',  '(',  ')',  '_',  '+',  '\b', '\t',
         'Q',  'W',  'E',  'R',  'T',  'Y',  'U',  'I',
         'O',  'P',  '{',  '}',  '\n', 0,    'A',  'S',
