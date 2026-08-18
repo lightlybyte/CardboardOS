@@ -1,4 +1,44 @@
-// src/kmain.c - Simple kernel with BRASH shell
+; src/boot.asm - Multiboot compliant bootloader
+; Build: nasm -f elf32 src/boot.asm -o build/boot.o
+
+[BITS 32]
+[GLOBAL start]
+[EXTERN kmain]      ; External C function
+
+; Multiboot header - GRUB 0.95 compatible
+section .multiboot
+align 4
+    dd 0x1BADB002          ; Magic number
+    dd 0x03                ; Flags: align on 4KB, provide memory info
+    dd -(0x1BADB002 + 0x03) ; Checksum
+
+; Kernel code section
+section .text
+start:
+    ; Set up stack pointer (16KB stack)
+    mov esp, stack_end
+    
+    ; Clear EFLAGS
+    push 0
+    popf
+    
+    ; Save multiboot info pointer for C code
+    push ebx
+    
+    ; Call kmain
+    call kmain
+    
+    ; If kmain returns, hang
+    cli
+    hlt
+    jmp $
+
+; Stack section - 16KB stack
+section .bss
+align 16
+stack_bottom:
+    resb 16384  ; 16KB stack
+stack_end:// src/kmain.c - Simple kernel with BRASH shell
 #define VIDEO_MEMORY 0xB8000
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
@@ -220,6 +260,35 @@ int is_key_pressed(void) {
     return inb(0x64) & 0x01;
 }
 
+// Convert scancode to ASCII
+char scancode_to_ascii(unsigned char scancode) {
+    // Simple scancode to ASCII mapping
+    // Only handles basic keys without shift
+    static const char scancode_map[128] = {
+        0,    0,    '1',  '2',  '3',  '4',  '5',  '6',  // 0x00-0x07
+        '7',  '8',  '9',  '0',  '-',  '=',  0,    0,    // 0x08-0x0F
+        0,    'q',  'w',  'e',  'r',  't',  'y',  'u',  // 0x10-0x17
+        'i',  'o',  'p',  '[',  ']',  '\n', 0,    'a',  // 0x18-0x1F
+        's',  'd',  'f',  'g',  'h',  'j',  'k',  'l',  // 0x20-0x27
+        ';',  '\'', '`',  0,    '\\', 'z',  'x',  'c',  // 0x28-0x2F
+        'v',  'b',  'n',  'm',  ',',  '.',  '/',  0,    // 0x30-0x37
+        0,    ' ',  0,    0,    0,    0,    0,    0,    // 0x38-0x3F
+        0,    0,    0,    0,    0,    0,    0,    0,    // 0x40-0x47
+        0,    0,    0,    0,    0,    0,    0,    0,    // 0x48-0x4F
+        0,    0,    0,    0,    0,    0,    0,    0,    // 0x50-0x57
+        0,    0,    0,    0,    0,    0,    0,    0,    // 0x58-0x5F
+        0,    0,    0,    0,    0,    0,    0,    0,    // 0x60-0x67
+        0,    0,    0,    0,    0,    0,    0,    0,    // 0x68-0x6F
+        0,    0,    0,    0,    0,    0,    0,    0,    // 0x70-0x77
+        0,    0,    0,    0,    0,    0,    0,    0     // 0x78-0x7F
+    };
+    
+    if (scancode < 128) {
+        return scancode_map[scancode];
+    }
+    return 0;
+}
+
 // Input functions
 char tinput(void) {
     // Wait for a key press and return the character
@@ -228,26 +297,9 @@ char tinput(void) {
             unsigned char scancode = get_scancode();
             if (!(scancode & 0x80)) {
                 // Key pressed (not released)
-                // Convert scancode to ASCII (simplified)
-                if (scancode >= 0x10 && scancode <= 0x19) {
-                    const char* nums = "1234567890";
-                    return nums[scancode - 0x10];
-                }
-                else if (scancode >= 0x1E && scancode <= 0x26) {
-                    const char* letters = "abcdefghijklmnopqrstuvwxyz";
-                    int idx = scancode - 0x1E;
-                    if (idx < 26) {
-                        return letters[idx];
-                    }
-                }
-                else if (scancode == 0x1C) {
-                    return '\n';
-                }
-                else if (scancode == 0x39) {
-                    return ' ';
-                }
-                else if (scancode == 0x0E) {
-                    return '\b';
+                char ascii = scancode_to_ascii(scancode);
+                if (ascii) {
+                    return ascii;
                 }
             }
         }
@@ -275,66 +327,22 @@ void tread(char* buffer, int max_len) {
         }
         
         // Convert scancode to ASCII
-        if (scancode == 0x1C) {  // Enter
+        char ascii = scancode_to_ascii(scancode);
+        
+        if (ascii == '\n') {  // Enter
             buffer[i] = '\0';
             tputchar('\n');
             return;
         }
-        else if (scancode == 0x0E) {  // Backspace
+        else if (ascii == '\b') {  // Backspace
             if (i > 0) {
                 i--;
                 tputchar('\b');
             }
         }
-        else if (scancode >= 0x10 && scancode <= 0x19) {
-            // Number keys 1-0
-            const char* nums = "1234567890";
-            c = nums[scancode - 0x10];
-            buffer[i++] = c;
-            tputchar(c);
-        }
-        else if (scancode >= 0x1E && scancode <= 0x26) {
-            // Keys a-p (simplified mapping)
-            const char* letters = "abcdefghijklmnopqrstuvwxyz";
-            int idx = scancode - 0x1E;
-            if (idx < 26) {
-                c = letters[idx];
-                buffer[i++] = c;
-                tputchar(c);
-            }
-        }
-        else if (scancode == 0x39) {
-            // Space
-            buffer[i++] = ' ';
-            tputchar(' ');
-        }
-        else if (scancode == 0x2C) {  // Z
-            buffer[i++] = 'z';
-            tputchar('z');
-        }
-        else if (scancode == 0x2D) {  // X
-            buffer[i++] = 'x';
-            tputchar('x');
-        }
-        else if (scancode == 0x2E) {  // C
-            buffer[i++] = 'c';
-            tputchar('c');
-        }
-        else if (scancode == 0x2F) {  // V
-            buffer[i++] = 'v';
-            tputchar('v');
-        }
-        else if (scancode == 0x30) {  // B
-            buffer[i++] = 'b';
-            tputchar('b');
-        }
-        else if (scancode == 0x31) {  // N
-            buffer[i++] = 'n';
-            tputchar('n');
-        }
-        else if (scancode == 0x32) {  // M
-            buffer[i++] = 'm';
-            tputchar('m');
+        else if (ascii) {  // Any other printable character
+            buffer[i++] = ascii;
+            tputchar(ascii);
         }
     }
     
