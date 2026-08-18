@@ -122,7 +122,7 @@ def build_kernel(toolchain, src_dir, output_dir):
     # Create output directory
     output_dir.mkdir(exist_ok=True)
     
-    # Build boot.asm
+    # Build boot.asm (MUST BE FIRST)
     print_color("  Assembling src/boot.asm...", Colors.YELLOW)
     boot_obj = output_dir / 'boot.o'
     run_command([
@@ -139,7 +139,7 @@ def build_kernel(toolchain, src_dir, output_dir):
     if drivers_dir.exists():
         c_files.extend(find_files(drivers_dir, '.c'))
     
-    obj_files = []
+    obj_files = [boot_obj]  # boot.o must be first
     for c_file in c_files:
         print_color(f"  Compiling {c_file.relative_to(src_dir)}...", Colors.YELLOW)
         obj_file = output_dir / f"{c_file.stem}.o"
@@ -211,7 +211,7 @@ SECTIONS
         '-o', str(kernel_bin)
     ]
     
-    # Add object files
+    # Add object files in correct order (boot.o first)
     ld_cmd.extend([str(obj) for obj in obj_files])
     
     # Handle different linkers
@@ -244,6 +244,7 @@ SECTIONS
                         break
             if not found:
                 print_color("  Warning: Multiboot header not found!", Colors.YELLOW)
+                print_color("  Check that boot.asm is being linked properly!", Colors.YELLOW)
     except:
         pass
     

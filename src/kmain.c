@@ -49,7 +49,6 @@ int strcmp(const char* s1, const char* s2);
 void strcpy(char* dest, const char* src);
 void strcat(char* dest, const char* src);
 int strncmp(const char* s1, const char* s2, int n);
-void strrev(char* str);
 
 // Keyboard functions
 unsigned char inb(unsigned short port);
@@ -166,15 +165,6 @@ int strncmp(const char* s1, const char* s2, int n) {
     }
     if (n < 0) return 0;
     return *(unsigned char*)s1 - *(unsigned char*)s2;
-}
-
-void strrev(char* str) {
-    int len = strlen(str);
-    for (int i = 0; i < len/2; i++) {
-        char temp = str[i];
-        str[i] = str[len-1-i];
-        str[len-1-i] = temp;
-    }
 }
 
 // Terminal implementation
@@ -323,11 +313,6 @@ char scancode_to_ascii(unsigned char scancode, uint8_t shift) {
     return 0;
 }
 
-// Check if shift is pressed
-uint8_t is_shift_pressed(void) {
-    return shift_pressed;
-}
-
 // Update modifier keys
 void update_modifiers(unsigned char scancode) {
     // Left Shift: 0x2A, Right Shift: 0x36
@@ -353,13 +338,10 @@ void update_modifiers(unsigned char scancode) {
     }
 }
 
-// Read line with arrow key support
+// FIXED: Read line with proper null termination
 void tread(char* buffer, int max_len) {
     int i = 0;
     int cursor_pos = 0;
-    int hist_idx = 0;
-    char history[10][MAX_CMD_LEN];
-    int hist_count = 0;
     char current_line[MAX_CMD_LEN];
     current_line[0] = '\0';
     
@@ -381,33 +363,7 @@ void tread(char* buffer, int max_len) {
         }
         
         // Special keys
-        if (scancode == 0x48) { // Up arrow
-            if (hist_count > 0) {
-                for (int j = 0; j < cursor_pos; j++) {
-                    tputchar('\b');
-                }
-                hist_idx = (hist_idx + 1) % hist_count;
-                strcpy(current_line, history[hist_idx]);
-                cursor_pos = strlen(current_line);
-                i = cursor_pos;
-                twrite(current_line);
-            }
-            continue;
-        }
-        else if (scancode == 0x50) { // Down arrow
-            if (hist_count > 0 && hist_idx > 0) {
-                for (int j = 0; j < cursor_pos; j++) {
-                    tputchar('\b');
-                }
-                hist_idx--;
-                strcpy(current_line, history[hist_idx]);
-                cursor_pos = strlen(current_line);
-                i = cursor_pos;
-                twrite(current_line);
-            }
-            continue;
-        }
-        else if (scancode == 0x4B) { // Left arrow
+        if (scancode == 0x4B) { // Left arrow
             if (cursor_pos > 0) {
                 cursor_pos--;
                 tputchar('\b');
@@ -421,52 +377,25 @@ void tread(char* buffer, int max_len) {
             }
             continue;
         }
-        else if (scancode == 0x47) { // Home
-            while (cursor_pos > 0) {
-                cursor_pos--;
-                tputchar('\b');
-            }
-            continue;
-        }
-        else if (scancode == 0x4F) { // End
-            while (cursor_pos < i) {
-                tputchar(current_line[cursor_pos]);
-                cursor_pos++;
-            }
-            continue;
-        }
-        else if (scancode == 0x53) { // Delete
-            if (cursor_pos < i) {
-                for (int j = cursor_pos; j < i - 1; j++) {
-                    current_line[j] = current_line[j+1];
-                }
-                i--;
-                current_line[i] = '\0';
-                tputchar('\b');
-                twrite(&current_line[cursor_pos]);
-                tputchar(' ');
-                for (int j = 0; j < i - cursor_pos + 1; j++) {
-                    tputchar('\b');
-                }
-            }
-            continue;
-        }
         
         // Convert scancode to ASCII
         char ascii = scancode_to_ascii(scancode, shift_pressed);
         
         if (ascii == '\n') { // Enter
-            buffer[i] = '\0';
-            tputchar('\n');
-            if (i > 0 && hist_count < 10) {
-                strcpy(history[hist_count], current_line);
-                hist_count++;
-                hist_idx = hist_count;
+            current_line[i] = '\0';
+            // Copy to buffer
+            int j = 0;
+            while (j <= i && j < max_len - 1) {
+                buffer[j] = current_line[j];
+                j++;
             }
+            buffer[j] = '\0';
+            tputchar('\n');
             return;
         }
         else if (ascii == '\b') { // Backspace
             if (cursor_pos > 0) {
+                // Remove character at cursor position
                 for (int j = cursor_pos - 1; j < i - 1; j++) {
                     current_line[j] = current_line[j+1];
                 }
@@ -474,7 +403,10 @@ void tread(char* buffer, int max_len) {
                 i--;
                 current_line[i] = '\0';
                 tputchar('\b');
-                twrite(&current_line[cursor_pos]);
+                // Redraw rest of line
+                for (int j = cursor_pos; j < i; j++) {
+                    tputchar(current_line[j]);
+                }
                 tputchar(' ');
                 for (int j = 0; j < i - cursor_pos + 1; j++) {
                     tputchar('\b');
@@ -491,6 +423,7 @@ void tread(char* buffer, int max_len) {
             current_line[i] = '\0';
         }
         else if (ascii && ascii >= ' ' && ascii <= '~') { // Printable
+            // Insert at cursor position
             for (int j = i; j >= cursor_pos; j--) {
                 current_line[j+1] = current_line[j];
             }
@@ -499,7 +432,10 @@ void tread(char* buffer, int max_len) {
             cursor_pos++;
             current_line[i] = '\0';
             
-            twrite(&current_line[cursor_pos - 1]);
+            // Redraw from cursor position
+            for (int j = cursor_pos - 1; j < i; j++) {
+                tputchar(current_line[j]);
+            }
             for (int j = 0; j < i - cursor_pos; j++) {
                 tputchar('\b');
             }
@@ -852,7 +788,7 @@ void shell_exfat_cmd(char* args) {
 
 void shell_prompt(void) {
     tsetcolor(COLOR_YELLOW);
-    twrite("BRASH> ");
+    twrite("root@CardboardOS~$ ");
     tsetcolor(COLOR_WHITE);
 }
 
@@ -874,111 +810,107 @@ void shell_init(void) {
     twrite("  Type 'help' for available commands\n\n");
 }
 
-// Execute shell command
+// FIXED: Execute shell command with simple parsing
 void shell_execute(char* cmd) {
-    char* args[MAX_ARGS];
-    int arg_count = 0;
-    char* token = cmd;
+    // Skip leading spaces
+    while (*cmd == ' ') cmd++;
     
-    while (*token == ' ') token++;
-    
-    while (*token && arg_count < MAX_ARGS) {
-        args[arg_count] = token;
-        arg_count++;
-        
-        while (*token && *token != ' ') token++;
-        
-        if (*token) {
-            *token = '\0';
-            token++;
-            while (*token == ' ') token++;
-        }
-    }
-    
-    if (arg_count == 0) {
+    if (*cmd == '\0') {
         return;
     }
     
-    // Command execution
-    if (strcmp(args[0], "help") == 0 || strcmp(args[0], "?") == 0) {
+    // Simple command parsing - find first space
+    char command[64];
+    char args[256];
+    int i = 0;
+    
+    // Extract command (first word)
+    while (*cmd && *cmd != ' ' && i < 63) {
+        command[i++] = *cmd++;
+    }
+    command[i] = '\0';
+    
+    // Skip spaces
+    while (*cmd == ' ') cmd++;
+    
+    // Copy args (rest of string)
+    i = 0;
+    while (*cmd && i < 255) {
+        args[i++] = *cmd++;
+    }
+    args[i] = '\0';
+    
+    // Debug output
+    tsetcolor(COLOR_LIGHT_GRAY);
+    twrite("[DEBUG] cmd='");
+    twrite(command);
+    twrite("' args='");
+    twrite(args);
+    twrite("'\n");
+    tsetcolor(COLOR_WHITE);
+    
+    // Execute command
+    if (strcmp(command, "help") == 0 || strcmp(command, "?") == 0) {
         shell_help();
     }
-    else if (strcmp(args[0], "echo") == 0) {
-        if (arg_count > 1) {
-            char buffer[MAX_CMD_LEN];
-            buffer[0] = '\0';
-            for (int i = 1; i < arg_count; i++) {
-                strcat(buffer, args[i]);
-                if (i < arg_count - 1) strcat(buffer, " ");
-            }
-            shell_echo(buffer);
-        } else {
-            shell_echo("");
-        }
+    else if (strcmp(command, "echo") == 0) {
+        shell_echo(args);
     }
-    else if (strcmp(args[0], "clear") == 0 || strcmp(args[0], "cls") == 0) {
+    else if (strcmp(command, "clear") == 0 || strcmp(command, "cls") == 0) {
         shell_clear();
     }
-    else if (strcmp(args[0], "neofetch") == 0 || strcmp(args[0], "nf") == 0) {
+    else if (strcmp(command, "neofetch") == 0 || strcmp(command, "nf") == 0) {
         shell_neofetch();
     }
-    else if (strcmp(args[0], "ls") == 0) {
-        shell_ls(arg_count > 1 ? args[1] : NULL);
+    else if (strcmp(command, "ls") == 0) {
+        shell_ls(args);
     }
-    else if (strcmp(args[0], "cd") == 0) {
-        shell_cd(arg_count > 1 ? args[1] : NULL);
+    else if (strcmp(command, "cd") == 0) {
+        shell_cd(args);
     }
-    else if (strcmp(args[0], "pwd") == 0) {
+    else if (strcmp(command, "pwd") == 0) {
         shell_pwd();
     }
-    else if (strcmp(args[0], "cat") == 0) {
-        shell_cat(arg_count > 1 ? args[1] : NULL);
+    else if (strcmp(command, "cat") == 0) {
+        shell_cat(args);
     }
-    else if (strcmp(args[0], "touch") == 0) {
-        shell_touch(arg_count > 1 ? args[1] : NULL);
+    else if (strcmp(command, "touch") == 0) {
+        shell_touch(args);
     }
-    else if (strcmp(args[0], "mkdir") == 0) {
-        shell_mkdir(arg_count > 1 ? args[1] : NULL);
+    else if (strcmp(command, "mkdir") == 0) {
+        shell_mkdir(args);
     }
-    else if (strcmp(args[0], "rm") == 0) {
-        shell_rm(arg_count > 1 ? args[1] : NULL);
+    else if (strcmp(command, "rm") == 0) {
+        shell_rm(args);
     }
-    else if (strcmp(args[0], "exfat") == 0) {
-        char* exfat_args = NULL;
-        if (arg_count > 1) {
-            exfat_args = args[1];
-            for (int i = 2; i < arg_count; i++) {
-                strcat(exfat_args, " ");
-                strcat(exfat_args, args[i]);
-            }
-        }
-        shell_exfat_cmd(exfat_args);
+    else if (strcmp(command, "exfat") == 0) {
+        shell_exfat_cmd(args);
     }
-    else if (strcmp(args[0], "reboot") == 0) {
+    else if (strcmp(command, "reboot") == 0) {
         shell_reboot();
     }
-    else if (strcmp(args[0], "halt") == 0) {
+    else if (strcmp(command, "halt") == 0) {
         shell_halt();
     }
-    else if (strcmp(args[0], "status") == 0 || strcmp(args[0], "info") == 0) {
+    else if (strcmp(command, "status") == 0 || strcmp(command, "info") == 0) {
         shell_status();
     }
-    else if (strcmp(args[0], "meminfo") == 0) {
+    else if (strcmp(command, "meminfo") == 0) {
         shell_meminfo();
     }
-    else if (strcmp(args[0], "version") == 0 || strcmp(args[0], "ver") == 0) {
+    else if (strcmp(command, "version") == 0 || strcmp(command, "ver") == 0) {
         shell_version();
     }
-    else if (strcmp(args[0], "about") == 0) {
+    else if (strcmp(command, "about") == 0) {
         shell_about();
     }
-    else if (strcmp(args[0], "whoami") == 0) {
+    else if (strcmp(command, "whoami") == 0) {
         shell_whoami();
     }
-    else if (strcmp(args[0], "uptime") == 0) {
+    else if (strcmp(command, "uptime") == 0) {
         shell_uptime();
     }
-    else if (strcmp(args[0], "exit") == 0 || strcmp(args[0], "quit") == 0) {
+    else if (strcmp(command, "exit") == 0 || strcmp(command, "quit") == 0) {
         tsetcolor(COLOR_YELLOW);
         twrite("Goodbye!\n");
         while(1) __asm__ volatile("hlt");
@@ -986,7 +918,7 @@ void shell_execute(char* cmd) {
     else {
         tsetcolor(COLOR_RED);
         twrite("Command not found: ");
-        twrite(args[0]);
+        twrite(command);
         twrite("\n");
         tsetcolor(COLOR_LIGHT_GRAY);
         twrite("Type 'help' for available commands\n");

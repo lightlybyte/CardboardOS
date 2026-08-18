@@ -8,6 +8,11 @@ typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned long long uint64_t;
 
+// NULL definition for freestanding environment
+#ifndef NULL
+#define NULL ((void*)0)
+#endif
+
 // exFAT Structures
 typedef struct {
     uint8_t  jump_boot[3];
@@ -81,5 +86,14 @@ uint32_t exfat_cluster_to_sector(uint32_t cluster);
 uint32_t exfat_get_next_cluster(uint32_t cluster);
 void exfat_print_info(void);
 int exfat_list_directory(const char* path);
+
+// External functions from kernel
+void tputchar(char c);
+void twrite(const char* data);
+void tsetcolor(unsigned char color);
+void* malloc(unsigned int size);
+void free(void* ptr);
+int strcmp(const char* s1, const char* s2);
+void strcpy(char* dest, const char* src);
 
 #endif // _EXFAT_H

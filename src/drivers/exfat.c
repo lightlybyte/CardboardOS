@@ -2,20 +2,6 @@
 #include "exfat.h"
 #include "disk.h"
 
-// External functions from kmain
-extern void twrite(const char* data);
-extern void tsetcolor(unsigned char color);
-extern void* malloc(unsigned int size);
-extern void free(void* ptr);
-extern int strcmp(const char* s1, const char* s2);
-extern void strcpy(char* dest, const char* src);
-
-// Color constants (from kmain)
-#define COLOR_RED           0x04
-#define COLOR_CYAN          0x03
-#define COLOR_GREEN         0x02
-#define COLOR_WHITE         0x0F
-
 // Global exFAT variables
 static exfat_boot_sector_t boot_sector;
 static uint32_t* fat_table = NULL;
@@ -25,6 +11,20 @@ static uint32_t sectors_per_cluster = 1;
 static uint32_t cluster_heap_start = 0;
 static uint32_t root_dir_cluster = 0;
 static uint32_t total_clusters = 0;
+
+// Color constants
+#define COLOR_RED           0x04
+#define COLOR_CYAN          0x03
+#define COLOR_GREEN         0x02
+#define COLOR_WHITE         0x0F
+#define COLOR_LIGHT_GRAY    0x07
+#define COLOR_YELLOW        0x0E
+
+// Internal functions
+static uint32_t read_fat_entry(uint32_t cluster);
+static int parse_directory(uint32_t cluster, const char* target, uint32_t* found_cluster);
+static void extract_name(const uint8_t* raw_name, char* out_name, int max_len);
+static uint32_t get_cluster_from_path(const char* path);
 
 // String functions for driver
 static int driver_strlen(const char* str) {
@@ -80,12 +80,6 @@ static void* driver_memcpy(void* dest, const void* src, unsigned int n) {
     }
     return dest;
 }
-
-// Internal functions
-static uint32_t read_fat_entry(uint32_t cluster);
-static int parse_directory(uint32_t cluster, const char* target, uint32_t* found_cluster);
-static void extract_name(const uint8_t* raw_name, char* out_name, int max_len);
-static uint32_t get_cluster_from_path(const char* path);
 
 // Convert number to string (for printing)
 static void uint32_to_str(uint32_t num, char* str) {
@@ -448,12 +442,12 @@ int exfat_list_directory(const char* path) {
                             twrite(size_str);
                             twrite(" bytes)");
                         } else if (size < 1024*1024) {
-                            uint32_to_str(size / 1024, size_str);
+                            uint32_to_str((uint32_t)(size / 1024), size_str);
                             twrite("~");
                             twrite(size_str);
                             twrite(" KB)");
                         } else {
-                            uint32_to_str(size / (1024*1024), size_str);
+                            uint32_to_str((uint32_t)(size / (1024*1024)), size_str);
                             twrite("~");
                             twrite(size_str);
                             twrite(" MB)");
@@ -487,15 +481,15 @@ void exfat_print_info(void) {
     twrite("Volume Size: ");
     uint64_t size = boot_sector.volume_length * bytes_per_sector;
     if (size < 1024*1024) {
-        uint32_to_str(size / 1024, str);
+        uint32_to_str((uint32_t)(size / 1024), str);
         twrite(str);
         twrite(" KB\n");
     } else if (size < 1024*1024*1024) {
-        uint32_to_str(size / (1024*1024), str);
+        uint32_to_str((uint32_t)(size / (1024*1024)), str);
         twrite(str);
         twrite(" MB\n");
     } else {
-        uint32_to_str(size / (1024*1024*1024), str);
+        uint32_to_str((uint32_t)(size / (1024*1024*1024)), str);
         twrite(str);
         twrite(" GB\n");
     }
