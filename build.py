@@ -136,7 +136,10 @@ def build_kernel(toolchain, src_dir, output_dir):
         toolchain['cc'],
         '-m32',
         '-ffreestanding',
+        '-fno-pie',
         '-nostdlib',
+        '-fno-stack-protector',
+        '-mno-red-zone',
         '-c',
         str(src_dir / 'kmain.c'),
         '-o', str(kmain_obj)
@@ -148,17 +151,50 @@ def build_kernel(toolchain, src_dir, output_dir):
         if 'clang' in toolchain['cc']:
             # Use GNU target for ELF output
             cc_cmd.extend(['--target=i386-pc-elf'])
+            # Remove incompatible flags
+            if '-fno-pie' in cc_cmd:
+                cc_cmd.remove('-fno-pie')
     
     run_command(cc_cmd)
     
-    # Link kernel
-    print_color("  Linking kernel...", Colors.YELLOW)
+    # Create linker script for proper ELF layout
+    linker_script = output_dir / 'linker.ld'
+    with open(linker_script, 'w') as f:
+        f.write("""
+ENTRY(start)
+
+SECTIONS
+{
+    /* Multiboot header needs to be in the first 8KB */
+    . = 0x100000;
+    
+    .multiboot : {
+        *(.multiboot)
+    }
+    
+    .text : {
+        *(.text)
+    }
+    
+    .data : {
+        *(.data)
+        *(.rodata)
+    }
+    
+    .bss : {
+        *(.bss)
+        *(COMMON)
+    }
+}
+""")
+    
+    # Link kernel using linker script
+    print_color("  Linking kernel with linker script...", Colors.YELLOW)
     kernel_bin = output_dir / 'kernel.bin'
     ld_cmd = [
         toolchain['linker'],
         '-m', 'elf_i386',
-        '-Ttext', '0x100000',
-        '-e', 'start',
+        '-T', str(linker_script),
         '-o', str(kernel_bin),
         str(boot_obj),
         str(kmain_obj)
@@ -166,21 +202,15 @@ def build_kernel(toolchain, src_dir, output_dir):
     
     # Handle different linkers
     if 'ld.lld' in toolchain['linker'] or 'lld-link' in toolchain['linker']:
-        # lld uses different flags
+        # lld uses slightly different syntax
         ld_cmd = [
             toolchain['linker'],
             '-m', 'elf_i386',
-            '-Ttext', '0x100000',
-            '--entry', 'start',
+            '-T', str(linker_script),
             '-o', str(kernel_bin),
             str(boot_obj),
             str(kmain_obj)
         ]
-        # Remove incompatible flags
-        if '-e' in ld_cmd:
-            idx = ld_cmd.index('-e')
-            ld_cmd.pop(idx)
-            ld_cmd.pop(idx)
     
     run_command(ld_cmd)
     
@@ -191,6 +221,26 @@ def build_kernel(toolchain, src_dir, output_dir):
     
     kernel_size = kernel_bin.stat().st_size
     print_color(f"  Kernel size: {kernel_size} bytes", Colors.GREEN)
+    
+    # Verify the kernel is Multiboot compliant
+    print_color("  Verifying Multiboot header...", Colors.YELLOW)
+    try:
+        # Check for Multiboot magic number at offset 0
+        with open(kernel_bin, 'rb') as f:
+            data = f.read(16)
+            # Look for 0x1BADB002 in the first 8KB
+            found = False
+            for i in range(0, min(8192, len(data)), 4):
+                if i + 4 <= len(data):
+                    magic = int.from_bytes(data[i:i+4], 'little')
+                    if magic == 0x1BADB002:
+                        found = True
+                        print_color(f"  Multiboot header found at offset 0x{i:04x}", Colors.GREEN)
+                        break
+            if not found:
+                print_color("  Warning: Multiboot header not found!", Colors.YELLOW)
+    except:
+        pass
     
     return kernel_bin
 
@@ -228,6 +278,7 @@ def create_iso(toolchain, kernel_bin, output_dir, stage2_path):
 # GRUB 0.95 config file
 timeout 5
 default 0
+color cyan/blue white/blue
 
 title CardboardOS v2026.8 - "Eclipse"
     kernel /boot/kernel.bin
@@ -240,7 +291,7 @@ title CardboardOS v2026.8 - "Eclipse"
 set timeout=5
 set default=0
 
-menuentry "My C Kernel" {
+menuentry "CardboardOS v2026.8 - Eclipse" {
     multiboot /boot/kernel.bin
     boot
 }
@@ -276,14 +327,13 @@ menuentry "My C Kernel" {
             ]
         
         # Change to ISO directory to avoid path issues
-        run_command(mkisofs_cmd, cwd=output_dir)
-        
-        if iso_path.exists():
+        result = run_command(mkisofs_cmd, cwd=output_dir, capture_output=True)
+        if result and result.returncode != 0:
+            print_color("  ISO creation failed, falling back to floppy...", Colors.YELLOW)
+        elif iso_path.exists():
             iso_size = iso_path.stat().st_size
             print_color(f"  ISO size: {iso_size} bytes", Colors.GREEN)
             return iso_path
-        else:
-            print_color("  ISO creation failed, falling back to floppy...", Colors.YELLOW)
     
     # Fallback: Create floppy image
     print_color("  Creating floppy image as fallback...", Colors.YELLOW)
