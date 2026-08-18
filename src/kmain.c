@@ -1,23 +1,12 @@
-// kmain.c - Simple kernel in C
+// src/kmain.c - Simple kernel in C
 #define VIDEO_MEMORY 0xB8000
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
 
-void terminal_initialize(void);
-void terminal_putchar(char c);
+void tinit(void);
+void tputchar(char c);
 void terminal_write(const char* data);
-void terminal_writestring(const char* data);
-
-// Simple terminal functions
-static inline void outb(unsigned short port, unsigned char val) {
-    __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
-}
-
-static inline unsigned char inb(unsigned short port) {
-    unsigned char ret;
-    __asm__ volatile ("inb %1, %0" : "=a"(ret) : "Nd"(port));
-    return ret;
-}
+void twrite(const char* data);
 
 // Terminal state
 static int terminal_row;
@@ -25,7 +14,7 @@ static int terminal_column;
 static unsigned char terminal_color;
 static unsigned short* terminal_buffer;
 
-void terminal_initialize(void) {
+void tinit(void) {
     terminal_row = 0;
     terminal_column = 0;
     terminal_color = 0x0F;  // White on black
@@ -37,7 +26,7 @@ void terminal_initialize(void) {
     }
 }
 
-void terminal_putchar(char c) {
+void tputchar(char c) {
     if (c == '\n') {
         terminal_row++;
         terminal_column = 0;
@@ -54,11 +43,10 @@ void terminal_putchar(char c) {
     }
     
     if (terminal_row >= VGA_HEIGHT) {
-        // Scroll up (simple implementation)
+        // Scroll up
         for (int i = 0; i < (VGA_HEIGHT - 1) * VGA_WIDTH; i++) {
             terminal_buffer[i] = terminal_buffer[i + VGA_WIDTH];
         }
-        // Clear last line
         for (int i = (VGA_HEIGHT - 1) * VGA_WIDTH; i < VGA_HEIGHT * VGA_WIDTH; i++) {
             terminal_buffer[i] = (unsigned short) (' ' | (terminal_color << 8));
         }
@@ -68,20 +56,23 @@ void terminal_putchar(char c) {
 
 void terminal_write(const char* data) {
     while (*data) {
-        terminal_putchar(*data++);
+        tputchar(*data++);
     }
 }
 
-void terminal_writestring(const char* data) {
+void twrite(const char* data) {
     terminal_write(data);
 }
 
 // Main kernel entry point
 void kmain(void) {
-    terminal_initialize();
-    terminal_writestring("Hello from C kernel!\n");
-    terminal_writestring("Bootloader loaded kmain successfully!\n");
-    terminal_writestring("System is running...\n");
+    tinit();
+    twrite("Hello from C kernel!\n");
+    twrite("Bootloader loaded kmain successfully!\n");
+    twrite("Running with GRUB 0.95\n");
+    
+    // Print some system info
+    twrite("\nSystem is running...\n");
     
     // Hang forever
     while(1) {

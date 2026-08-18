@@ -1,30 +1,28 @@
-; boot.asm - Multiboot compliant bootloader that loads kmain.c
-; Build: nasm -f elf32 boot.asm -o boot.o
-; Link: ld -m elf_i386 -Ttext 0x100000 -e kmain boot.o -o kernel.bin
-; Create ISO: grub-mkrescue -o boot.iso iso/
+; src/boot.asm - Multiboot compliant bootloader for GRUB 0.95 / Paperboot 26.8
+; Build: nasm -f elf32 src/boot.asm -o build/boot.o
 
 [BITS 32]
 [GLOBAL start]
 [EXTERN kmain]      ; External C function
 
-; Multiboot header - required for GRUB
+; Multiboot header - GRUB 0.95 compatible
 section .multiboot
 align 4
     dd 0x1BADB002          ; Magic number
-    dd 0x03                ; Flags (0x03 = align on 4KB, provide memory info)
+    dd 0x03                ; Flags: align on 4KB, provide memory info
     dd -(0x1BADB002 + 0x03) ; Checksum
 
 ; Kernel code section
 section .text
 start:
-    ; Set up stack pointer (stack grows down)
+    ; Set up stack pointer (16KB stack)
     mov esp, stack_end
     
     ; Clear EFLAGS
     push 0
     popf
     
-    ; Save multiboot info pointer (in EBX) for C code
+    ; Save multiboot info pointer for C code
     push ebx
     
     ; Call kmain
