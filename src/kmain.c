@@ -220,18 +220,18 @@ int is_key_pressed(void) {
     return inb(0x64) & 0x01;
 }
 
-// Convert scancode to ASCII
+// Convert scancode to ASCII - Corrected mapping
 char scancode_to_ascii(unsigned char scancode) {
-    // Simple scancode to ASCII mapping
-    // Only handles basic keys without shift
+    // Correct scancode to ASCII mapping for US keyboard layout
+    // Based on standard IBM PC AT scancode set 1
     static const char scancode_map[128] = {
         0,    0,    '1',  '2',  '3',  '4',  '5',  '6',  // 0x00-0x07
-        '7',  '8',  '9',  '0',  '-',  '=',  0,    0,    // 0x08-0x0F
-        0,    'q',  'w',  'e',  'r',  't',  'y',  'u',  // 0x10-0x17
-        'i',  'o',  'p',  '[',  ']',  '\n', 0,    'a',  // 0x18-0x1F
-        's',  'd',  'f',  'g',  'h',  'j',  'k',  'l',  // 0x20-0x27
-        ';',  '\'', '`',  0,    '\\', 'z',  'x',  'c',  // 0x28-0x2F
-        'v',  'b',  'n',  'm',  ',',  '.',  '/',  0,    // 0x30-0x37
+        '7',  '8',  '9',  '0',  '-',  '=',  '\b', '\t', // 0x08-0x0F
+        'q',  'w',  'e',  'r',  't',  'y',  'u',  'i',  // 0x10-0x17
+        'o',  'p',  '[',  ']',  '\n', 0,    'a',  's',  // 0x18-0x1F
+        'd',  'f',  'g',  'h',  'j',  'k',  'l',  ';',  // 0x20-0x27
+        '\'', '`',  0,    '\\', 'z',  'x',  'c',  'v',  // 0x28-0x2F
+        'b',  'n',  'm',  ',',  '.',  '/',  0,    '*',  // 0x30-0x37
         0,    ' ',  0,    0,    0,    0,    0,    0,    // 0x38-0x3F
         0,    0,    0,    0,    0,    0,    0,    0,    // 0x40-0x47
         0,    0,    0,    0,    0,    0,    0,    0,    // 0x48-0x4F
@@ -247,6 +247,16 @@ char scancode_to_ascii(unsigned char scancode) {
         return scancode_map[scancode];
     }
     return 0;
+}
+
+// Check if shift key is pressed
+int is_shift_pressed(void) {
+    // Read keyboard status
+    unsigned char status = inb(0x64);
+    // Check if shift is pressed (simplified - we'd need to track key states)
+    // For now, we'll just check if either shift key is down
+    // This is a simplified version
+    return 0; // We'll implement proper shift handling later
 }
 
 // Input functions
@@ -281,7 +291,7 @@ void tread(char* buffer, int max_len) {
         
         unsigned char scancode = get_scancode();
         
-        // Ignore key releases
+        // Ignore key releases (bit 7 set)
         if (scancode & 0x80) {
             continue;
         }
@@ -289,7 +299,7 @@ void tread(char* buffer, int max_len) {
         // Convert scancode to ASCII
         char ascii = scancode_to_ascii(scancode);
         
-        if (ascii == '\n') {  // Enter
+        if (ascii == '\n') {  // Enter key
             buffer[i] = '\0';
             tputchar('\n');
             return;
@@ -298,12 +308,22 @@ void tread(char* buffer, int max_len) {
             if (i > 0) {
                 i--;
                 tputchar('\b');
+                // Also clear the character from the buffer
+                buffer[i] = '\0';
             }
         }
-        else if (ascii) {  // Any other printable character
+        else if (ascii == '\t') {  // Tab
+            // Add 4 spaces for tab
+            for (int j = 0; j < 4 && i < max_len - 1; j++) {
+                buffer[i++] = ' ';
+                tputchar(' ');
+            }
+        }
+        else if (ascii && ascii >= ' ' && ascii <= '~') {  // Printable characters
             buffer[i++] = ascii;
             tputchar(ascii);
         }
+        // Ignore other control characters
     }
     
     buffer[i] = '\0';
