@@ -1,0 +1,33 @@
+; CardboardOS System Information Program
+
+main:
+[
+    write("========================================\n")
+    write("     System Information                  \n")
+    write("========================================\n\n")
+    
+    write("OS Name:    CardboardOS\n")
+    write("Version:    0.1.0\n")
+    write("Build:      %BUILD_DATE%\n")
+    write("Arch:       x86_64\n\n")
+    
+    write("Memory:\n")
+    write("  Total:    %MEM_TOTAL% MB\n")
+    write("  Free:     %MEM_FREE% MB\n")
+    write("  Used:     %MEM_USED% MB\n\n")
+    
+    write("Storage:\n")
+    write("  Filesystem: exFAT\n")
+    write("  Mounted:    / (root)\n")
+    write("  USB:        /mnt/usb\n\n")
+    
+    write("Language:\n")
+    write("  Interpreter: NotC v1.0\n")
+    write("  Builtins:    write, read, readkey,\n")
+    write("               listfiles, run, exit\n\n")
+    
+    write("Press any key to exit...")
+    key = readkey()
+    
+    write("\n")
+]

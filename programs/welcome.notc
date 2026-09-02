@@ -1,0 +1,27 @@
+; CardboardOS Welcome Program
+
+main:
+[
+    write("    ╔═══════════════════════════════╗\n")
+    write("    ║   CardboardOS v0.1.0         ║\n")
+    write("    ║   Welcome to your new OS!    ║\n")
+    write("    ╚═══════════════════════════════╝\n\n")
+    
+    write("System Information:\n")
+    write("  Architecture: x86_64\n")
+    write("  Filesystem:   exFAT\n")
+    write("  Language:     NotC\n")
+    write("  GUI:          Yes\n\n")
+    
+    write("Available Programs:\n")
+    
+    ; List programs (simplified)
+    files = listfiles("/programs/")
+    for file in files:
+    [
+        write("  - " + file + "\n")
+    ]
+    
+    write("\nType 'run <program>' to execute\n")
+    write("Type 'help' for commands\n")
+]

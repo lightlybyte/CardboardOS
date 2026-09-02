@@ -1,0 +1,38 @@
+; CardboardOS Guide Program
+; This is the guide that's bundled with the OS
+
+main:
+[
+    write("========================================\n")
+    write("     Welcome to CardboardOS Guide       \n")
+    write("========================================\n\n")
+    
+    write("CardboardOS is a hobbyist operating system\n")
+    write("built for x86_64 with a graphical UI.\n\n")
+    
+    write("Key Features:\n")
+    write("  - GUI with windows and widgets\n")
+    write("  - exFAT file system support\n")
+    write("  - NotC programming language\n")
+    write("  - USB storage support\n")
+    write("  - Mouse and keyboard input\n\n")
+    
+    write("Getting Started:\n")
+    write("  1. Connect a USB drive with exFAT format\n")
+    write("  2. Place .notc files in the root directory\n")
+    write("  3. Programs will appear in the launcher\n\n")
+    
+    write("NotC Language Example:\n")
+    write("  main:\n")
+    write("  [\n")
+    write("      write(\"Hello, World!\\n\")\n")
+    write("  ]\n\n")
+    
+    write("Press any key to continue...")
+    
+    ; Wait for key press
+    key = readkey()
+    
+    write("\n\nThank you for using CardboardOS!\n")
+    write("========================================\n")
+]
