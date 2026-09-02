@@ -8,14 +8,6 @@ Usage:
     python build.py --iso        # Build ISO only (requires kernel)
     python build.py --run        # Build and run in QEMU
     python build.py --clean --run # Clean, build, and run
-    
-Features:
-    - Cross-compiles kernel with Clang/LLD
-    - Assembles boot code with NASM
-    - Compiles NotC programs
-    - Creates bootable ISO with GRUB
-    - Prepares exFAT USB image
-    - Runs in QEMU for testing
 """
 
 import os
@@ -23,8 +15,6 @@ import sys
 import shutil
 import subprocess
 import argparse
-import json
-import hashlib
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
@@ -64,7 +54,7 @@ class Config:
     ]
     
     CXXFLAGS = CFLAGS + ["-std=c++17"]
-    ASMFLAGS = ["-f", "elf64"]
+    ASMFLAGS = ["-f", "elf64", "-F", "dwarf", "-g"]
     
     LDFLAGS = [
         "-target", TARGET,
@@ -101,65 +91,43 @@ class Config:
 # UTILITY FUNCTIONS
 # ============================================================================
 
-class Colors:
-    """ANSI color codes"""
-    HEADER = '\033[95m'
-    BLUE = '\033[94m'
-    CYAN = '\033[96m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-
 def print_header(text: str):
     """Print a section header"""
-    print(f"\n{Colors.CYAN}{'='*70}{Colors.ENDC}")
-    print(f"{Colors.BOLD}{Colors.HEADER}  {text}{Colors.ENDC}")
-    print(f"{Colors.CYAN}{'='*70}{Colors.ENDC}")
+    print(f"\n{'='*70}")
+    print(f"  {text}")
+    print(f"{'='*70}")
 
 def print_success(text: str):
     """Print success message"""
-    print(f"{Colors.GREEN}✅ {text}{Colors.ENDC}")
+    print(f"[OK] {text}")
 
 def print_error(text: str):
     """Print error message"""
-    print(f"{Colors.RED}❌ {text}{Colors.ENDC}")
+    print(f"[ERROR] {text}")
     sys.exit(1)
 
 def print_info(text: str):
     """Print info message"""
-    print(f"{Colors.BLUE}ℹ️  {text}{Colors.ENDC}")
+    print(f"[INFO] {text}")
 
 def print_warning(text: str):
     """Print warning message"""
-    print(f"{Colors.YELLOW}⚠️  {text}{Colors.ENDC}")
+    print(f"[WARNING] {text}")
 
 def print_step(text: str):
     """Print build step"""
-    print(f"{Colors.BOLD}  ➜ {text}{Colors.ENDC}")
+    print(f"  -> {text}")
 
 def run_command(cmd: List[str], description: str = "", cwd: Optional[Path] = None, 
                 capture_output: bool = False, verbose: bool = True) -> Tuple[int, str, str]:
     """
     Run a shell command with error handling
-    
-    Args:
-        cmd: Command and arguments as list
-        description: Human-readable description
-        cwd: Working directory
-        capture_output: Capture stdout/stderr
-        verbose: Print command being run
-    
-    Returns:
-        Tuple of (returncode, stdout, stderr)
     """
     if description:
         print_step(description)
     
     if verbose:
-        print(f"    {Colors.YELLOW}{' '.join(cmd)}{Colors.ENDC}")
+        print(f"    {' '.join(cmd)}")
     
     try:
         if capture_output:
@@ -169,39 +137,11 @@ def run_command(cmd: List[str], description: str = "", cwd: Optional[Path] = Non
             result = subprocess.run(cmd, cwd=cwd, check=False)
             return result.returncode, "", ""
     except FileNotFoundError:
-        print_error(f"Command not found: {cmd[0]}\nPlease make sure it's installed and in PATH.")
+        print_error(f"Command not found: {cmd[0]}")
         return -1, "", ""
     except Exception as e:
         print_error(f"Failed to run command: {e}")
         return -1, "", ""
-
-def check_tools():
-    """Check if required tools are installed"""
-    tools = [
-        Config.CC, Config.ASM, Config.LD, Config.OBJCOPY,
-        "grub-mkrescue", "xorriso", "mtools"
-    ]
-    
-    missing = []
-    for tool in tools:
-        # Handle tools with hyphens and special names
-        tool_name = tool.split()[0] if ' ' in tool else tool
-        try:
-            subprocess.run([tool_name, "--version"], 
-                         stdout=subprocess.DEVNULL, 
-                         stderr=subprocess.DEVNULL, 
-                         check=True)
-        except (subprocess.SubprocessError, FileNotFoundError):
-            missing.append(tool_name)
-    
-    if missing:
-        print_warning(f"Missing tools: {', '.join(missing)}")
-        print_info("Install missing tools with:")
-        print("  Windows: choco install llvm nasm grub2 xorriso mtools")
-        print("  Linux:   sudo apt install clang lld nasm grub-pc-bin xorriso mtools")
-        return False
-    
-    return True
 
 def clean_build():
     """Clean build directory"""
@@ -233,11 +173,6 @@ class CardboardOSBuilder:
         
         # Create build directories
         self._setup_dirs()
-        
-        # Check tools
-        if not check_tools():
-            if verbose:
-                print_warning("Some tools are missing. Build may fail.")
     
     def _setup_dirs(self):
         """Create all necessary build directories"""
@@ -362,14 +297,18 @@ class CardboardOSBuilder:
         self.object_files.append(obj_file)
     
     def _assemble_nasm(self, source: Path):
-        """Assemble a NASM file"""
+        """Assemble a NASM file with 64-bit support"""
         rel_path = source.relative_to(Config.SRC_DIR)
         obj_file = Config.OBJ_DIR / rel_path.with_suffix('.o')
         obj_file.parent.mkdir(parents=True, exist_ok=True)
         
+        # Use elf64 format for 64-bit code
         cmd = [
             Config.ASM,
-            *Config.ASMFLAGS,
+            "-f", "elf64",
+            "-F", "dwarf",
+            "-g",
+            "-I", str(source.parent),
             str(source),
             "-o", str(obj_file),
         ]
@@ -467,20 +406,14 @@ class CardboardOSBuilder:
         print_success(f"Compiled {len(notc_files)} NotC programs")
     
     def _compile_notc(self, source: Path):
-        """
-        Compile a NotC program (simplified)
-        In a real implementation, this would use a proper NotC compiler
-        """
-        print_step(f"Compiling {source.name}")
+        """Compile a NotC program (copy to ISO for now)"""
+        print_step(f"Processing {source.name}")
         
         # Copy to ISO programs directory
         dest = Config.PROGRAMS_DIR / source.name
         shutil.copy2(source, dest)
         
-        # In a real implementation, you'd compile the .notc file to bytecode
-        # For now, we just copy the source
-        
-        # Optionally, validate the NotC syntax
+        # Basic validation of NotC syntax
         self._validate_notc(source)
     
     def _validate_notc(self, source: Path):
@@ -516,7 +449,6 @@ class CardboardOSBuilder:
         if grub_cfg.exists():
             shutil.copy2(grub_cfg, Config.ISO_DIR / "boot" / "grub" / "grub.cfg")
         else:
-            # Create default GRUB config
             self._create_default_grub_cfg()
         
         # Create ISO using grub-mkrescue
@@ -532,7 +464,6 @@ class CardboardOSBuilder:
         )
         
         if returncode != 0:
-            # Try alternative method with xorriso
             print_warning("grub-mkrescue failed, trying xorriso...")
             self._create_iso_with_xorriso()
         else:
@@ -562,16 +493,7 @@ menuentry "CardboardOS (safe mode)" {
     multiboot /kernel/CardboardOS.elf --safe
     boot
 }
-
-menuentry "System Information" {
-    echo "CardboardOS v0.1.0"
-    echo "Built on: {date}"
-    echo "Architecture: x86_64"
-    echo "Press any key to continue..."
-    read
-    boot
-}
-""".format(date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+"""
         
         grub_cfg.write_text(content)
         print_step("Created default GRUB configuration")
@@ -605,7 +527,6 @@ menuentry "System Information" {
         """Create a bootable USB image with exFAT"""
         print_header("Creating USB Image")
         
-        # This is a simplified version - in reality you'd use tools like dd, mkfs.exfat
         img_path = Config.USB_IMAGE
         
         # Create a 64MB image file
@@ -613,13 +534,9 @@ menuentry "System Information" {
         run_command(cmd, "Creating USB image file", verbose=self.verbose)
         
         # Format with exFAT
-        # On Windows, you'd use format.exe or fsutil
-        # On Linux, you'd use mkfs.exfat
         if sys.platform == "win32":
-            # Windows: we'd use a tool like mkfs.exfat from exfat-utils
             cmd = ["mkfs.exfat", str(img_path)]
         else:
-            # Linux
             cmd = ["mkfs.exfat", "-n", "CARDBOARD", str(img_path)]
         
         returncode, stdout, stderr = run_command(
@@ -633,8 +550,6 @@ menuentry "System Information" {
         else:
             print_success(f"USB image created: {img_path}")
         
-        # Copy kernel to USB image
-        # This requires mounting the image first, which is OS-specific
         print_info("Kernel must be copied to USB image separately")
         print_info("For testing, use the ISO or the kernel binary directly")
 
@@ -660,9 +575,8 @@ menuentry "System Information" {
             "-name", "CardboardOS",
         ]
         
-        # Add debug options if requested
         if self.debug:
-            cmd.extend(["-s", "-S"])  # Wait for debugger
+            cmd.extend(["-s", "-S"])
         
         print_info("Starting QEMU...")
         print_info("Press Ctrl+Alt+G to release mouse")
@@ -681,17 +595,15 @@ menuentry "System Information" {
         print_info(f"Build started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print_info(f"Configuration: {Config.TARGET}")
         
-        # Build stages
         self.compile_files()
         self.link_kernel()
         self.compile_notc_programs()
         self.create_iso()
         self.create_usb_image()
         
-        # Show build summary
         self._show_summary()
         
-        print_header("Build Complete! ✅")
+        print_header("Build Complete")
         print_info(f"ISO: {Config.ISO_FILE}")
         print_info(f"Kernel: {Config.KERNEL_ELF}")
         print_info(f"Binary: {Config.KERNEL_BIN}")
@@ -701,11 +613,9 @@ menuentry "System Information" {
         """Show build summary"""
         print_header("Build Summary")
         
-        # Count object files
         obj_count = len(self.object_files)
         print_info(f"Object files: {obj_count}")
         
-        # File sizes
         if Config.KERNEL_ELF.exists():
             size = Config.KERNEL_ELF.stat().st_size
             print_info(f"Kernel ELF: {size // 1024} KB")
@@ -718,7 +628,6 @@ menuentry "System Information" {
             size = Config.ISO_FILE.stat().st_size
             print_info(f"ISO: {size // 1024} KB")
         
-        # NotC programs
         notc_files = list(Config.PROGRAMS_DIR.glob("*.notc"))
         if notc_files:
             print_info(f"NotC programs: {len(notc_files)}")
@@ -755,32 +664,23 @@ Examples:
                        help="Enable debug symbols and QEMU debugging")
     parser.add_argument("--verbose", action="store_true",
                        help="Verbose output")
-    parser.add_argument("--config", type=str,
-                       help="Path to configuration file")
     
     args = parser.parse_args()
     
-    # Create builder
     builder = CardboardOSBuilder(verbose=args.verbose)
     builder.debug = args.debug
     
-    # Handle clean
     if args.clean:
         clean_build()
-        # After cleaning, we still build unless we're only cleaning
-        if len(sys.argv) == 2:  # Only --clean was passed
-            print_info("Done cleaning.")
+        if len(sys.argv) == 2:
             return
     
-    # Check if ISO only
     if args.iso:
         builder.create_iso()
         return
     
-    # Full build
     builder.build()
     
-    # Run in QEMU if requested
     if args.run:
         builder.run_qemu()
 
