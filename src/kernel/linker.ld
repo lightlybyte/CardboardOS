@@ -1,25 +1,28 @@
 ENTRY(_start)
 
-SECTIONS {
-    . = 0x100000;
+SECTIONS
+{
+    . = 0xFFFFFFFF80000000;
 
-    .multiboot : {
-        KEEP(*(.multiboot))
+    .limine_requests : ALIGN(4096) {
+        KEEP(*(.limine_requests_start))
+        KEEP(*(.limine_requests))
+        KEEP(*(.limine_requests_end))
     }
 
-    .text : {
+    .text : ALIGN(4096) {
         *(.text)
     }
 
-    .rodata : {
+    .rodata : ALIGN(4096) {
         *(.rodata)
     }
 
-    .data : {
+    .data : ALIGN(4096) {
         *(.data)
     }
 
-    .bss : {
+    .bss : ALIGN(4096) {
         *(COMMON)
         *(.bss)
     }

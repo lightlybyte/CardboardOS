@@ -1,29 +1,19 @@
-MB_MAGIC    equ 0x1BADB002
-MB_FLAGS    equ 0x00000003
-MB_CHECKSUM equ -(MB_MAGIC + MB_FLAGS)
-
-section .multiboot
-align 4
-    dd MB_MAGIC
-    dd MB_FLAGS
-    dd MB_CHECKSUM
-
 section .bss
-align 16
+align 4096
 stack_bottom:
-    resb 16384
+    resb 32768
 stack_top:
 
 section .text
+bits 64
 global _start
 extern kmain
 
 _start:
-    mov  esp, stack_top
-    push ebx
-    push eax
-    call kmain 
-    cli
+    mov  rsp, stack_top
+    call kmain
+
 .hang:
+    cli
     hlt
     jmp .hang
