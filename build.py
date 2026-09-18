@@ -11,13 +11,14 @@ iso_dir     = os.path.join(build_dir, "iso")
 boot_dir    = os.path.join(iso_dir, "boot")
 
 LIMINE_DIR  = r"C:\limine"
+LIMINE_EXE  = os.path.join(LIMINE_DIR, "limine.exe")
 LIMINE_SYS  = os.path.join(LIMINE_DIR, "limine-bios.sys")
 LIMINE_CD   = os.path.join(LIMINE_DIR, "limine-bios-cd.bin")
 
-NASM    = shutil.which("nasm")   or "nasm"
-CLANG   = shutil.which("clang")  or "clang"
-LD_LLD  = shutil.which("ld.lld") or shutil.which("ld.lld.exe")
-XORRISO = shutil.which("xorriso") or "xorriso"
+NASM    = shutil.which("nasm")            or "nasm"
+CLANG   = shutil.which("clang")           or "clang"
+LD_LLD  = shutil.which("ld.lld")          or shutil.which("ld.lld.exe")
+XORRISO = shutil.which("xorriso")         or "xorriso"
 QEMU    = shutil.which("qemu-system-x86_64") or "qemu-system-x86_64"
 
 if not LD_LLD:
@@ -44,6 +45,7 @@ boot_obj    = os.path.join(build_dir, "boot.o")
 irq1_obj    = os.path.join(build_dir, "irq1.o")
 kernel_elf  = os.path.join(build_dir, "cardboard.elf")
 iso_path    = os.path.join(build_dir, "cardboard.iso")
+disk_path   = os.path.join(root, "fat32.img")
 
 if os.path.exists(iso_dir):
     shutil.rmtree(iso_dir)
@@ -134,11 +136,9 @@ run([
 ], cwd=build_dir)
 
 print("[ 4/5 ] Installing Limine BIOS stage...")
-run([os.path.join(LIMINE_DIR, "limine.exe"), "bios-install",
-     "--force", "cardboard.iso"], cwd=build_dir)
+run([LIMINE_EXE, "bios-install", "--force", "cardboard.iso"], cwd=build_dir)
 
 print("[ 5/5 ] Running OS in QEMU (x86-64)...")
-disk_path = os.path.join(root, "fat32.img")
 run([
     QEMU,
     "-cdrom", iso_path,

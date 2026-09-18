@@ -1,5 +1,5 @@
 section .bss
-align 4096
+align 16
 stack_bottom:
     resb 32768
 stack_top:
@@ -12,7 +12,6 @@ extern kmain
 _start:
     mov  rsp, stack_top
     call kmain
-
 .hang:
     cli
     hlt

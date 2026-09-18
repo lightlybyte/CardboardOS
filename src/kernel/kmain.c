@@ -6,12 +6,14 @@
 #include "diskio.h"
 #include "limine.h"
 
+extern const uint8_t vga_font_8x16[4096];
 extern struct limine_framebuffer *get_framebuffer(void);
-extern uint64_t get_hhdm_offset(void);
 
 #define FONT_W 8
 #define FONT_H 16
-#define FONT_ROM_PHYS 0xFFA6E
+
+/* Set to 1 to print IDT/PIC/CS diagnostics at boot. */
+#define DEBUG_DIAGNOSTICS 1
 
 /* ---- Port I/O ---- */
 static inline uint8_t inb(uint16_t port) {
@@ -83,16 +85,9 @@ static void fb_scroll(void) {
     fb_cursor_y -= line_h;
 }
 
-/* ---- BIOS font ---- */
-static const uint8_t *font_rom = 0;
-
-static void font_init(void) {
-    uint64_t hhdm = get_hhdm_offset();
-    font_rom = (const uint8_t *)(hhdm + FONT_ROM_PHYS);
-}
-
+/* ---- Text rendering ---- */
 static void draw_char(uint8_t c, uint32_t x, uint32_t y, uint32_t color) {
-    const uint8_t *glyph = font_rom + (uint32_t)c * FONT_H;
+    const uint8_t *glyph = vga_font_8x16 + (uint32_t)c * FONT_H;
     for (uint32_t gy = 0; gy < FONT_H; gy++) {
         uint8_t bits = glyph[gy];
         for (uint32_t gx = 0; gx < FONT_W; gx++) {
@@ -102,8 +97,9 @@ static void draw_char(uint8_t c, uint32_t x, uint32_t y, uint32_t color) {
     }
 }
 
-void kprint(const char *s) {
-    if (!fb || !font_rom) return;
+/* Must be called with interrupts disabled. */
+static void kprint_nolock(const char *s) {
+    if (!fb) return;
     while (*s) {
         uint8_t c = (uint8_t)*s++;
         if (c == '\n') {
@@ -121,6 +117,12 @@ void kprint(const char *s) {
             fb_scroll();
         }
     }
+}
+
+void kprint(const char *s) {
+    __asm__ volatile("cli");
+    kprint_nolock(s);
+    __asm__ volatile("sti");
 }
 
 void kprintc(char c) {
@@ -181,12 +183,14 @@ struct idt_ptr {
 static struct idt_entry idt[256];
 static struct idt_ptr   idtp;
 
+static uint16_t kernel_cs = 0x08;  /* overwritten at boot with real CS */
+
 extern void irq1_stub(void);
 
 static void idt_set(int n, void (*handler)(void)) {
     uint64_t addr = (uint64_t)handler;
     idt[n].off_lo  = addr & 0xFFFF;
-    idt[n].sel     = 0x08;
+    idt[n].sel     = kernel_cs;
     idt[n].ist     = 0;
     idt[n].type    = 0x8E;
     idt[n].off_mid = (addr >> 16) & 0xFFFF;
@@ -374,6 +378,18 @@ void kmain(void) {
     serial_init();
     serial_puts("\n=== CardboardOS ===\n");
 
+    /* Read the actual code and data selectors Limine set up. */
+    uint16_t cs, ds, ss;
+    __asm__ volatile("mov %%cs, %0" : "=r"(cs));
+    __asm__ volatile("mov %%ds, %0" : "=r"(ds));
+    __asm__ volatile("mov %%ss, %0" : "=r"(ss));
+    kernel_cs = cs;
+
+    serial_puts("CS="); serial_hex(cs);
+    serial_puts(" DS="); serial_hex(ds);
+    serial_puts(" SS="); serial_hex(ss);
+    serial_puts("\n");
+
     struct limine_framebuffer *lfb = get_framebuffer();
     if (!lfb) {
         serial_puts("no framebuffer\n");
@@ -385,11 +401,6 @@ void kmain(void) {
     fb_height = lfb->height;
     fb_pitch  = lfb->pitch;
 
-    font_init();
-    serial_puts("font rom: ");
-    serial_hex((uint64_t)font_rom);
-    serial_puts("\n");
-
     fb_clear(0x00000000);
     kprint("CardboardOS\n");
     kprint("type 'help' for commands\n\n");
@@ -397,6 +408,28 @@ void kmain(void) {
     idt_set(0x21, irq1_stub);
     idt_load();
     pic_remap();
+
+#if DEBUG_DIAGNOSTICS
+    serial_puts("--- IDT diagnostics ---\n");
+    serial_puts("idt base:   "); serial_hex((uint64_t)&idt);       serial_puts("\n");
+    serial_puts("idtp.base:  "); serial_hex((uint64_t)idtp.base);  serial_puts("\n");
+    serial_puts("idtp.limit: "); serial_u64(idtp.limit);           serial_puts("\n");
+    serial_puts("irq1_stub:  "); serial_hex((uint64_t)irq1_stub);  serial_puts("\n");
+    serial_puts("idt[0x21].off_lo:  "); serial_hex(idt[0x21].off_lo);  serial_puts("\n");
+    serial_puts("idt[0x21].off_mid: "); serial_hex(idt[0x21].off_mid); serial_puts("\n");
+    serial_puts("idt[0x21].off_hi:  "); serial_hex(idt[0x21].off_hi);  serial_puts("\n");
+    serial_puts("idt[0x21].sel:     "); serial_hex(idt[0x21].sel);     serial_puts("\n");
+    serial_puts("idt[0x21].type:    "); serial_hex(idt[0x21].type);    serial_puts("\n");
+    uint64_t re =
+        ((uint64_t)idt[0x21].off_hi  << 32) |
+        ((uint64_t)idt[0x21].off_mid << 16) |
+        ((uint64_t)idt[0x21].off_lo);
+    serial_puts("idt[0x21] reassembled: "); serial_hex(re); serial_puts("\n");
+    serial_puts("PIC master IMR: "); serial_hex(inb(0x21)); serial_puts("\n");
+    serial_puts("PIC slave IMR:  "); serial_hex(inb(0xA1)); serial_puts("\n");
+    serial_puts("--- end diagnostics ---\n");
+#endif
+
     __asm__ volatile("sti");
 
     kprint("> ");
@@ -406,13 +439,22 @@ void kmain(void) {
 
     for (;;) {
         char c = kinput();
+
         if (c == '\n') {
             kprintc('\n');
             shell_line(line, len);
             len = 0;
             kprint("> ");
         } else if (c == '\b') {
-            if (len > 0) { len--; kprintc('\b'); }
+            if (len > 0) {
+                len--;
+                __asm__ volatile("cli");
+                fb_cursor_x -= FONT_W;
+                for (uint32_t gy = 0; gy < FONT_H; gy++)
+                    for (uint32_t gx = 0; gx < FONT_W; gx++)
+                        fb_putpixel(fb_cursor_x + gx, fb_cursor_y + gy, 0);
+                __asm__ volatile("sti");
+            }
         } else if (c >= ' ' && len < 127) {
             line[len++] = c;
             kprintc(c);
