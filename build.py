@@ -15,17 +15,17 @@ LIMINE_EXE  = os.path.join(LIMINE_DIR, "limine.exe")
 LIMINE_SYS  = os.path.join(LIMINE_DIR, "limine-bios.sys")
 LIMINE_CD   = os.path.join(LIMINE_DIR, "limine-bios-cd.bin")
 
-NASM    = shutil.which("nasm")            or "nasm"
-CLANG   = shutil.which("clang")           or "clang"
-LD_LLD  = shutil.which("ld.lld")          or shutil.which("ld.lld.exe")
-XORRISO = shutil.which("xorriso")         or "xorriso"
+NASM    = shutil.which("nasm")               or "nasm"
+CLANG   = shutil.which("clang")              or "clang"
+LD_LLD  = shutil.which("ld.lld")             or shutil.which("ld.lld.exe")
+XORRISO = shutil.which("xorriso")            or "xorriso"
 QEMU    = shutil.which("qemu-system-x86_64") or "qemu-system-x86_64"
 
 if not LD_LLD:
     print("ERROR: ld.lld not found on PATH.")
     sys.exit(1)
 
-kernel_srcs = [
+kernel_c_srcs = [
     "kmain.c",
     "diskio.c",
     "ide.c",
@@ -33,6 +33,14 @@ kernel_srcs = [
     "string.c",
     "vga_font.c",
     "limine_requests.c",
+    "notc.c",
+    "notc_hook.c",
+    "libc_stubs.c",
+]
+
+kernel_cpp_srcs = [
+    "cxx_support.cpp",
+    "gui.cpp",
 ]
 
 boot_src    = os.path.join(kernel_dir, "boot.asm")
@@ -64,7 +72,6 @@ def run(cmd, cwd=None):
 print("[ 0/5 ] Converting VGA8.F16 to C source...")
 with open(font_bin, "rb") as f:
     data = f.read()
-
 if len(data) != 4096:
     print(f"ERROR: VGA8.F16 is {len(data)} bytes, expected 4096")
     sys.exit(1)
@@ -77,31 +84,43 @@ with open(font_c, "w") as f:
         f.write(", ".join(f"0x{b:02X}" for b in data[i:i+16]))
         f.write(",\n")
     f.write("};\n")
-
 print(f"    wrote {font_c}")
 
 print("[ 1/5 ] Compiling OS Kernel (x86-64)...")
 run([NASM, "-f", "elf64", boot_src, "-o", boot_obj])
 run([NASM, "-f", "elf64", irq1_src, "-o", irq1_obj])
 
+common_flags = [
+    "-target", "x86_64-elf",
+    "-m64",
+    "-ffreestanding",
+    "-fno-stack-protector",
+    "-fno-builtin",
+    "-mno-red-zone",
+    "-I", include_dir,
+    "-I", kernel_dir,
+]
+
+cpp_flags = common_flags + [
+    "-fno-exceptions",
+    "-fno-rtti",
+    "-std=c++17",
+    "-Wno-empty-body",
+]
+
 objs = [boot_obj, irq1_obj]
-for src in kernel_srcs:
+
+for src in kernel_c_srcs:
     s = os.path.join(kernel_dir, src)
-    o = os.path.join(build_dir, src.replace(".c", ".o"))
+    o = os.path.join(build_dir, src.rsplit(".", 1)[0] + ".o")
     objs.append(o)
-    run([
-        CLANG,
-        "-target", "x86_64-elf",
-        "-m64",
-        "-ffreestanding",
-        "-fno-stack-protector",
-        "-fno-builtin",
-        "-mno-red-zone",
-        "-I", include_dir,
-        "-I", kernel_dir,
-        "-c", s,
-        "-o", o,
-    ])
+    run([CLANG, *common_flags, "-c", s, "-o", o])
+
+for src in kernel_cpp_srcs:
+    s = os.path.join(kernel_dir, src)
+    o = os.path.join(build_dir, src.rsplit(".", 1)[0] + ".o")
+    objs.append(o)
+    run([CLANG, *cpp_flags, "-c", s, "-o", o])
 
 run([LD_LLD, "-m", "elf_x86_64", "-T", linker_ld, *objs, "-o", kernel_elf])
 

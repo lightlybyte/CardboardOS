@@ -1,24 +1,20 @@
 #include <stdint.h>
 
-static inline uint8_t inb(uint16_t p) {
-    uint8_t v;
-    __asm__ volatile("inb %1, %0" : "=a"(v) : "Nd"(p));
-    return v;
-}
-static inline uint16_t inw(uint16_t p) {
-    uint16_t v;
-    __asm__ volatile("inw %1, %0" : "=a"(v) : "Nd"(p));
-    return v;
-}
-static inline void outb(uint16_t p, uint8_t v) {
-    __asm__ volatile("outb %0, %1" : : "a"(v), "Nd"(p));
-}
-static inline void outw(uint16_t p, uint16_t v) {
-    __asm__ volatile("outw %0, %1" : : "a"(v), "Nd"(p));
+static inline uint8_t  inb(uint16_t p){uint8_t v;__asm__ volatile("inb %1,%0":"=a"(v):"Nd"(p));return v;}
+static inline uint16_t inw(uint16_t p){uint16_t v;__asm__ volatile("inw %1,%0":"=a"(v):"Nd"(p));return v;}
+static inline void outb(uint16_t p,uint8_t v){__asm__ volatile("outb %0,%1"::"a"(v),"Nd"(p));}
+static inline void outw(uint16_t p,uint16_t v){__asm__ volatile("outw %0,%1"::"a"(v),"Nd"(p));}
+
+static void dbg_putc(char c) { outb(0x3F8, (uint8_t)c); }
+static void dbg_puts(const char *s) { while (*s) dbg_putc(*s++); }
+static void dbg_u64(uint64_t v) {
+    char b[21]; int i = 0;
+    if (v == 0) { dbg_putc('0'); return; }
+    while (v && i < 20) { b[i++] = '0' + (v % 10); v /= 10; }
+    while (i--) dbg_putc(b[i]);
 }
 
 #define ATA_DATA   0x1F0
-#define ATA_ERROR  0x1F1
 #define ATA_SECCNT 0x1F2
 #define ATA_LBA0   0x1F3
 #define ATA_LBA1   0x1F4
@@ -26,7 +22,6 @@ static inline void outw(uint16_t p, uint16_t v) {
 #define ATA_DRIVE  0x1F6
 #define ATA_STATUS 0x1F7
 #define ATA_CMD    0x1F7
-#define ATA_CTRL   0x3F6
 
 #define ATA_SR_BSY 0x80
 #define ATA_SR_DRQ 0x08
@@ -35,7 +30,6 @@ static inline void outw(uint16_t p, uint16_t v) {
 static void ata_wait_bsy(void) {
     while (inb(ATA_STATUS) & ATA_SR_BSY) { }
 }
-
 static int ata_wait_drq(void) {
     for (int i = 0; i < 100000; i++) {
         uint8_t s = inb(ATA_STATUS);
@@ -64,26 +58,38 @@ int ide_read_sectors(uint32_t lba, uint32_t count, void *buf) {
             if (ata_wait_drq() != 0) return -1;
             for (int i = 0; i < 256; i++) *p++ = inw(ATA_DATA);
         }
-        lba   += chunk;
+        lba += chunk;
         count -= chunk;
     }
     return 0;
 }
 
 int ide_write_sectors(uint32_t lba, uint32_t count, const void *buf) {
+    dbg_puts("[W lba="); dbg_u64(lba);
+    dbg_puts(" cnt=");   dbg_u64(count);
+    dbg_puts("]\n");
+
     const uint16_t *p = (const uint16_t *)buf;
     while (count > 0) {
         uint8_t chunk = (count > 255) ? 255 : (uint8_t)count;
+        dbg_puts("  wait_bsy\n");
         ata_wait_bsy();
+        dbg_puts("  setup\n");
         ata_setup_lba(lba, chunk);
+        dbg_puts("  cmd 0x30\n");
         outb(ATA_CMD, 0x30);
         for (uint8_t s = 0; s < chunk; s++) {
-            if (ata_wait_drq() != 0) return -1;
+            if (ata_wait_drq() != 0) { dbg_puts("  DRQ FAIL\n"); return -1; }
             for (int i = 0; i < 256; i++) outw(ATA_DATA, *p++);
         }
+        dbg_puts("  flush\n");
         outb(ATA_CMD, 0xE7);
         ata_wait_bsy();
+        dbg_puts("  flushed\n");
+        lba += chunk;
+        count -= chunk;
     }
+    dbg_puts("[W done]\n");
     return 0;
 }
 

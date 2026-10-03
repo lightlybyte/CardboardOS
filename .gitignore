@@ -1,1 +1,7 @@
 build/
+*.o
+*.elf
+*.iso
+*.img
+fat32.img
+src/kernel/vga_font.c
